@@ -25,7 +25,7 @@ export function KolamCursor() {
       if (!cursor) return;
       cursor.style.transform = `translate3d(${event.clientX}px, ${event.clientY}px, 0)`;
       const target = event.target instanceof Element ? event.target : null;
-      cursor.dataset.mode = target?.closest('[data-drape]') ? 'drape' : target?.closest('a,button') ? 'needle' : '';
+      cursor.dataset['mode'] = target?.closest('[data-drape]') ? 'drape' : target?.closest('a,button') ? 'needle' : '';
       cursor.style.opacity = '1';
     };
     const hide = () => { if (ref.current) ref.current.style.opacity = '0'; };

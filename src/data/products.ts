@@ -32,7 +32,7 @@ const colorways = [
 export const products: Product[] = weaves.flatMap((weave, w) => colorways.map((color, c) => ({
   ...weave, id: `iy-${String(w * 4 + c + 1).padStart(3, '0')}`,
   name: `${weave.name} ${color.name} Saree`, price: weave.price + c * 400,
-  occasion: occasions[(w + c) % occasions.length], colors: [color.name],
+  occasion: occasions[(w + c) % occasions.length] ?? 'Casual', colors: [color.name],
   sizes: ['Free size'], image: color.image,
   unsplashImage: `https://images.unsplash.com/photo-1610030469983-98e550d6193c?auto=format&fit=crop&w=800&q=85`,
 })));
