@@ -2,9 +2,6 @@
 const festivalCalendar = [
   { name: 'Diwali', date: '2026-11-08T00:00:00+05:30' },
   { name: 'Pongal', date: '2027-01-15T00:00:00+05:30' },
-  { name: 'Navratri', date: '2027-09-30T00:00:00+05:30' },
-  { name: 'Diwali', date: '2027-10-29T00:00:00+05:30' },
-  { name: 'Pongal', date: '2028-01-15T00:00:00+05:30' },
 ];
 export function nextFestival(now: Date) {
   return festivalCalendar.find(f => new Date(f.date).getTime() > now.getTime()) ?? null;
