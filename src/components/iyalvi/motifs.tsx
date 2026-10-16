@@ -5,5 +5,5 @@ export function Diya({ className = '' }: { className?: string }) {
   return <svg viewBox="0 0 32 32" fill="none" className={className} aria-hidden="true"><path d="M5 18H27C25 25 20 28 16 28C12 28 7 25 5 18Z" stroke="currentColor" strokeWidth="1.5"/><path d="M16 16C10 12 16 5 17 3C18 8 23 12 16 16Z" stroke="currentColor" strokeWidth="1.5"/><path d="M3 15L1 12M29 15L31 12M9 8L7 5M25 8L27 5" stroke="currentColor" strokeWidth="1.2"/></svg>;
 }
 export function Brand({ compact = false }: { compact?: boolean }) {
-  return <span className={`brand ${compact ? 'brand-compact' : ''}`}><Kolam/><span>IYALVI</span>{!compact && <small>THREADS OF TRADITION</small>}</span>;
+  return <span className={`brand ${compact ? 'brand-compact' : ''}`}><Kolam/><span>IYALVI</span>{!compact && <small>STYLE YOUR WAY</small>}</span>;
 }
