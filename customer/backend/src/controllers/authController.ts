@@ -58,6 +58,7 @@ export const login: RequestHandler = async (request, response) => {
     }
     throw new HttpError(401, "Invalid credentials");
   }
+  if (user.isBlocked) throw new HttpError(401, "Account unavailable");
 
   await User.updateOne({ _id: user._id }, { $set: { failedLoginAttempts: 0 }, $unset: { lockUntil: 1 } });
   await issueSession(user, response);
@@ -127,6 +128,7 @@ export const verifyPhoneOtp: RequestHandler = async (request, response) => {
 
   const user = await User.findOne({ phone }).exec();
   if (!user) throw new HttpError(401, "Invalid or expired code");
+  if (user.isBlocked) throw new HttpError(401, "Account unavailable");
   user.isVerified = true;
   await user.save();
   await issueSession(user, response);

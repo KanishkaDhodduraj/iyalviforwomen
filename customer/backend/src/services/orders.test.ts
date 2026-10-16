@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { Address } from "../models/Address.js";
+import { Discount } from "../models/Discount.js";
 import { Order } from "../models/Order.js";
 import { Product } from "../models/Product.js";
 import { calculateCartPrice } from "./pricing.js";
@@ -9,7 +11,18 @@ import {
   findOwnedOrder,
   isAllowedStatusTransition,
   orderCreateBody,
+  reserveAndCreateOrder,
 } from "./orders.js";
+
+function mockDiscounts(discounts: unknown[] = []) {
+  const query = {
+    sort: vi.fn(() => query),
+    lean: vi.fn(() => query),
+    session: vi.fn(() => query),
+    exec: vi.fn(async () => discounts),
+  };
+  vi.spyOn(Discount, "find").mockReturnValue(query as never);
+}
 
 describe("server-side cart pricing", () => {
   beforeEach(() => {
@@ -18,18 +31,21 @@ describe("server-side cart pricing", () => {
 
   it("recalculates subtotal and shipping from persisted product prices", async () => {
     const productId = new mongoose.Types.ObjectId();
-    vi.spyOn(Product, "find").mockReturnValue({
+    mockDiscounts();
+    const productQuery = {
+      session: vi.fn(() => productQuery),
       exec: async () => [
         {
           _id: productId,
           name: "Cotton Kurti",
           price: 600,
           stock: 10,
-          sizes: ["M"],
+          sizes: [{ size: "M", stock: 10 }],
           colors: ["Indigo"],
         },
       ],
-    } as never);
+    };
+    vi.spyOn(Product, "find").mockReturnValue(productQuery as never);
 
     const result = await calculateCartPrice(
       new mongoose.Types.ObjectId().toString(),
@@ -51,6 +67,161 @@ describe("server-side cart pricing", () => {
       ]),
     ).rejects.toMatchObject({ status: 400 });
   });
+
+  it("recalculates discounted prices from active server discounts", async () => {
+    const productId = new mongoose.Types.ObjectId();
+    mockDiscounts([
+      {
+        _id: new mongoose.Types.ObjectId(),
+        name: "Seasonal",
+        scope: "sitewide",
+        targets: [],
+        type: "percent",
+        value: 20,
+        startsAt: new Date(Date.now() - 60_000),
+        endsAt: new Date(Date.now() + 60_000),
+        priority: 1,
+        stackable: false,
+      },
+    ]);
+    const productQuery = {
+      session: vi.fn(() => productQuery),
+      exec: async () => [
+        {
+          _id: productId,
+          name: "Cotton Kurti",
+          category: "kurti",
+          price: 600,
+          stock: 10,
+          sizes: [{ size: "M", stock: 10 }],
+          colors: ["Indigo"],
+        },
+      ],
+    };
+    vi.spyOn(Product, "find").mockReturnValue(productQuery as never);
+
+    const result = await calculateCartPrice(undefined, [
+      { productId: productId.toString(), size: "M", color: "Indigo", qty: 2 },
+    ]);
+
+    expect(result.items[0]).toMatchObject({
+      unitPrice: 480,
+      originalUnitPrice: 600,
+      discountAmount: 240,
+      discounts: [{ name: "Seasonal", amount: 120 }],
+    });
+    expect(result).toMatchObject({ subtotal: 1200, discount: 240, shipping: 99, total: 1059 });
+  });
+
+  it("checks stock for the requested size instead of trusting aggregate stock", async () => {
+    const productId = new mongoose.Types.ObjectId();
+    mockDiscounts();
+    vi.spyOn(Product, "find").mockReturnValue({
+      exec: async () => [
+        {
+          _id: productId,
+          name: "Cotton Kurti",
+          category: "kurti",
+          price: 600,
+          stock: 10,
+          sizes: [
+            { size: "M", stock: 0 },
+            { size: "L", stock: 10 },
+          ],
+          colors: ["Indigo"],
+        },
+      ],
+    } as never);
+
+    await expect(
+      calculateCartPrice(undefined, [
+        { productId: productId.toString(), size: "M", color: "Indigo", qty: 1 },
+      ]),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("snapshots the recalculated per-item discount in the created order", async () => {
+    const productId = new mongoose.Types.ObjectId();
+    const addressId = new mongoose.Types.ObjectId();
+    const order = { _id: new mongoose.Types.ObjectId() };
+    mockDiscounts([
+      {
+        _id: new mongoose.Types.ObjectId(),
+        name: "Order offer",
+        scope: "sitewide",
+        targets: [],
+        type: "flat",
+        value: 100,
+        startsAt: new Date(Date.now() - 60_000),
+        endsAt: new Date(Date.now() + 60_000),
+        priority: 10,
+        stackable: false,
+      },
+    ]);
+    vi.spyOn(Address, "findOne").mockReturnValue({
+      lean: () => ({
+        exec: async () => ({
+          name: "Customer",
+          phone: "9876543210",
+          line1: "1 Main Street",
+          line2: "",
+          city: "Chennai",
+          state: "Tamil Nadu",
+          pincode: "600001",
+        }),
+      }),
+    } as never);
+    const productQuery = {
+      session: vi.fn(() => productQuery),
+      exec: async () => [
+        {
+          _id: productId,
+          name: "Cotton Kurti",
+          category: "kurti",
+          price: 1200,
+          stock: 3,
+          sizes: [{ size: "M", stock: 3 }],
+          colors: ["Indigo"],
+        },
+      ],
+    };
+    vi.spyOn(Product, "find").mockReturnValue(productQuery as never);
+    vi.spyOn(Product, "updateOne").mockReturnValue({
+      exec: async () => ({ modifiedCount: 1 }),
+    } as never);
+    const session = {
+      withTransaction: async (callback: () => Promise<void>) => callback(),
+      endSession: async () => undefined,
+    };
+    vi.spyOn(mongoose, "startSession").mockResolvedValue(session as never);
+    const createOrder = vi.spyOn(Order, "create").mockResolvedValue([order] as never);
+
+    await reserveAndCreateOrder({
+      userId: new mongoose.Types.ObjectId().toString(),
+      items: [{ productId: productId.toString(), size: "M", color: "Indigo", qty: 1 }],
+      addressId: addressId.toString(),
+      paymentMethod: "COD",
+    });
+
+    expect(createOrder).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          subtotal: 1200,
+          discount: 100,
+          total: 1100,
+          items: [
+            expect.objectContaining({
+              unitPrice: 1100,
+              originalUnitPrice: 1200,
+              discountAmount: 100,
+              discounts: [expect.objectContaining({ name: "Order offer", amount: 100 })],
+            }),
+          ],
+        }),
+      ],
+      { session },
+    );
+  });
 });
 
 describe("atomic stock reservations", () => {
@@ -71,8 +242,14 @@ describe("atomic stock reservations", () => {
 
     expect(stock).toBe(0);
     expect(updateOne).toHaveBeenCalledWith(
-      { _id: productId.toString(), isActive: true, stock: { $gte: 3 } },
-      { $inc: { stock: -3 } },
+      {
+        _id: productId.toString(),
+        isActive: true,
+        archived: { $ne: true },
+        stock: { $gte: 3 },
+        sizes: { $elemMatch: { size: "M", stock: { $gte: 3 } } },
+      },
+      { $inc: { stock: -3, "sizes.$.stock": -3 } },
       undefined,
     );
   });

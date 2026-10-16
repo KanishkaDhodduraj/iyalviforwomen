@@ -27,6 +27,39 @@ import { Kolam } from "./motifs";
 import { api, getAllProducts, productFromApi, type ApiProduct } from "@/lib/api";
 import { LoginDialog } from "@/components/iyalvi/account-control";
 
+function flashSaleRemaining(endsAt: string): string | null {
+  const remainingMs = new Date(endsAt).getTime() - Date.now();
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return null;
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const clock = [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
+  return days > 0 ? `${days}d ${clock}` : clock;
+}
+
+function FlashSaleCountdown({ endsAt }: { endsAt: string }) {
+  const [remaining, setRemaining] = useState(() => flashSaleRemaining(endsAt));
+
+  useEffect(() => {
+    const update = () => setRemaining(flashSaleRemaining(endsAt));
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [endsAt]);
+
+  if (!remaining) return null;
+  return (
+    <small
+      className="flash-countdown product-flash-countdown"
+      aria-label={`Flash sale ends in ${remaining}`}
+    >
+      <Clock aria-hidden="true" />
+      <span>{remaining}</span>
+    </small>
+  );
+}
+
 export function ProductCard({
   product,
   onSelect,
@@ -118,6 +151,7 @@ export function ProductCard({
               product.craft
             )}
           </span>
+          {product.offerEndsAt && <FlashSaleCountdown endsAt={product.offerEndsAt} />}
         </div>
         <div className="product-meta">
           <span>{product.fabric}</span>
@@ -395,6 +429,12 @@ export function ProductDialog({
                   {formatPrice(product.price)}{" "}
                   {product.originalPrice && <del>{formatPrice(product.originalPrice)}</del>}
                 </p>
+                {product.originalPrice && (
+                  <b className="product-sale-badge detail-sale-badge">
+                    {Math.round((1 - product.price / product.originalPrice) * 100)}% OFF
+                  </b>
+                )}
+                {product.offerEndsAt && <FlashSaleCountdown endsAt={product.offerEndsAt} />}
                 <div className="detail-options">
                   <label>
                     Colour

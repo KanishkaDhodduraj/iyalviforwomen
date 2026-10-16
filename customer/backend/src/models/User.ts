@@ -15,6 +15,7 @@ const userSchema = new Schema(
     passwordHash: { type: String, select: false },
     googleId: { type: String, unique: true, sparse: true, select: false },
     role: { type: String, enum: ["user", "admin"], default: "user", required: true },
+    isBlocked: { type: Boolean, default: false, required: true, index: true },
     isVerified: { type: Boolean, default: false, required: true },
     failedLoginAttempts: { type: Number, default: 0, select: false },
     lockUntil: { type: Date, select: false },

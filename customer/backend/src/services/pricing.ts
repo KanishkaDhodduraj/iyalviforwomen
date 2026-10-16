@@ -3,8 +3,10 @@ import { z } from "zod";
 
 import { Coupon } from "../models/Coupon.js";
 import { CouponRedemption } from "../models/CouponRedemption.js";
+import { Discount } from "../models/Discount.js";
 import { Product } from "../models/Product.js";
 import { HttpError } from "../middleware/errors.js";
+import { priceWithDiscounts, selectApplicableDiscounts, type DiscountSnapshot } from "./discounts.js";
 
 export const cartItemSchema = z
   .object({
@@ -26,6 +28,9 @@ export interface PricedItem {
   color: string;
   qty: number;
   unitPrice: number;
+  originalUnitPrice: number;
+  discountAmount: number;
+  discounts: DiscountSnapshot[];
 }
 
 export interface CartPrice {
@@ -45,37 +50,69 @@ export async function calculateCartPrice(
   checkPerUserUsage = true,
 ): Promise<CartPrice> {
   if (items.length === 0 || items.length > 50) throw new HttpError(400, "Cart must contain 1 to 50 items");
-  const ids = [...new Set(items.map(({ productId }) => productId))];
-  let productQuery = Product.find({ _id: { $in: ids }, isActive: true });
+  const ids = [...new Set(items.map(({ productId }) => productId.toLowerCase()))];
+  let productQuery = Product.find({ _id: { $in: ids }, isActive: true, archived: { $ne: true } });
   if (session) productQuery = productQuery.session(session);
   const products = await productQuery.exec();
-  const byId = new Map(products.map((product) => [String(product._id), product]));
-  const stockByProduct = new Map<string, number>();
-
-  const pricedItems = items.map((item) => {
-    const product = byId.get(item.productId);
-    if (!product || !product.sizes.includes(item.size) || !product.colors.includes(item.color)) {
+  const byId = new Map(products.map((product) => [String(product._id).toLowerCase(), product]));
+  for (const item of items) {
+    const product = byId.get(item.productId.toLowerCase());
+    if (!product || sizeStock(product, item.size) === undefined || !product.colors.includes(item.color)) {
       throw new HttpError(400, "A cart item is unavailable");
     }
-    stockByProduct.set(item.productId, (stockByProduct.get(item.productId) ?? 0) + item.qty);
+  }
+  const now = new Date();
+  let discountQuery = Discount.find({
+    isActive: true,
+    startsAt: { $lte: now },
+    endsAt: { $gt: now },
+  });
+  if (session) discountQuery = discountQuery.session(session);
+  const activeDiscounts = await discountQuery.sort({ priority: -1, _id: 1 }).lean().exec();
+  const stockByProduct = new Map<string, number>();
+  let productDiscountTotal = 0;
+
+  const pricedItems = items.map((item) => {
+    const product = byId.get(item.productId.toLowerCase());
+    if (!product) throw new HttpError(400, "A cart item is unavailable");
+    const stockKey = `${item.productId.toLowerCase()}\u0000${item.size}`;
+    stockByProduct.set(stockKey, (stockByProduct.get(stockKey) ?? 0) + item.qty);
+    const applicable = selectApplicableDiscounts(
+      activeDiscounts,
+      {
+        id: item.productId.toLowerCase(),
+        slug: product.slug,
+        category: product.category,
+        collection: product.subCategory,
+      },
+      now,
+    );
+    const price = priceWithDiscounts(product.price, applicable);
+    productDiscountTotal += price.discountAmount * item.qty;
     return {
       product: product._id,
       name: product.name,
       size: item.size,
       color: item.color,
       qty: item.qty,
-      unitPrice: product.price,
+      unitPrice: price.price,
+      originalUnitPrice: product.price,
+      discountAmount: price.discountAmount * item.qty,
+      discounts: price.discounts,
     };
   });
 
-  for (const [productId, quantity] of stockByProduct) {
-    if ((byId.get(productId)?.stock ?? 0) < quantity) {
+  for (const [stockKey, quantity] of stockByProduct) {
+    const [productId, size] = stockKey.split("\u0000");
+    const product = byId.get(productId!);
+    if (!product || (sizeStock(product, size!) ?? 0) < quantity) {
       throw new HttpError(409, "Insufficient stock");
     }
   }
 
-  const subtotal = pricedItems.reduce((sum, item) => sum + item.unitPrice * item.qty, 0);
-  let discount = 0;
+  const originalSubtotal = pricedItems.reduce((sum, item) => sum + item.originalUnitPrice * item.qty, 0);
+  const discountedSubtotal = originalSubtotal - productDiscountTotal;
+  let couponDiscount = 0;
   let normalizedCoupon: string | undefined;
   if (couponCode) {
     if (!userId) throw new HttpError(401, "Authentication required to use a coupon");
@@ -88,7 +125,7 @@ export async function calculateCartPrice(
     })
       .session(session ?? null)
       .exec();
-    if (!coupon || subtotal < coupon.minOrder) throw new HttpError(400, "Coupon is invalid or unavailable");
+    if (!coupon || discountedSubtotal < coupon.minOrder) throw new HttpError(400, "Coupon is invalid or unavailable");
 
     if (checkPerUserUsage) {
       const redemptionQuery = CouponRedemption.findOne({ coupon: coupon._id, user: userId });
@@ -98,20 +135,44 @@ export async function calculateCartPrice(
         throw new HttpError(400, "Coupon is invalid or unavailable");
       }
     }
-    const amount = coupon.type === "percent" ? (subtotal * coupon.value) / 100 : coupon.value;
-    discount = Math.min(Math.round(amount), coupon.maxDiscount ?? Number.MAX_SAFE_INTEGER, subtotal);
+    const amount = coupon.type === "percent" ? (discountedSubtotal * coupon.value) / 100 : coupon.value;
+    couponDiscount = Math.min(
+      Math.round(amount),
+      coupon.maxDiscount ?? Number.MAX_SAFE_INTEGER,
+      discountedSubtotal,
+    );
     normalizedCoupon = coupon.code;
   }
 
-  const shipping = subtotal > 999 ? 0 : 99;
+  const discount = productDiscountTotal + couponDiscount;
+  const shipping = discountedSubtotal - couponDiscount > 999 ? 0 : 99;
   return {
     items: pricedItems,
-    subtotal,
+    subtotal: originalSubtotal,
     discount,
     shipping,
-    total: subtotal - discount + shipping,
+    total: originalSubtotal - discount + shipping,
     ...(normalizedCoupon && { couponCode: normalizedCoupon }),
   };
+}
+
+function sizeStock(product: { sizes: unknown[]; stock: number }, size: string): number | undefined {
+  const match = product.sizes.find((entry) =>
+    typeof entry === "string" ? entry === size : isSizeStock(entry) && entry.size === size,
+  );
+  if (typeof match === "string") return product.stock;
+  return isSizeStock(match) ? match.stock : undefined;
+}
+
+function isSizeStock(value: unknown): value is { size: string; stock: number } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "size" in value &&
+    "stock" in value &&
+    typeof value.size === "string" &&
+    typeof value.stock === "number"
+  );
 }
 
 export async function consumeCoupon(

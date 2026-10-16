@@ -616,6 +616,9 @@
 .product-sale-badge { font-weight:500; color:var(--maroon); background:color-mix(in oklch,var(--gold) 31%,var(--background)); padding:5px 8px; }
 .product-price { display:flex; align-items:center; gap:10px; }
 .product-price del,.detail-price del { color:var(--muted-foreground); font-size:.85em; }
+.product-flash-countdown { display:flex; align-items:center; gap:4px; color:var(--primary); font-size:8px; font-variant-numeric:tabular-nums; }
+.product-flash-countdown svg { width:11px; height:11px; }
+.detail-sale-badge { display:inline-block; margin-top:5px; }
 .complete-look { border-top:1px solid var(--border); margin-top:22px; padding-top:18px; }
 .complete-look-item { display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); }
 .complete-look-item img { width:42px; height:52px; object-fit:cover; }

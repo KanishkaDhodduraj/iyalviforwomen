@@ -45,32 +45,44 @@ export const orderStatusBody = z
 
 export async function decrementStock(items: CartItemInput[], session?: ClientSession): Promise<void> {
   const quantities = aggregateQuantities(items);
-  const decremented: Array<[string, number]> = [];
+  const decremented: Array<[string, string, number]> = [];
   try {
-    for (const [productId, qty] of quantities) {
+    for (const { productId, size, qty } of quantities.values()) {
       const result = await Product.updateOne(
-        { _id: productId, isActive: true, stock: { $gte: qty } },
-        { $inc: { stock: -qty } },
+        {
+          _id: productId,
+          isActive: true,
+          archived: { $ne: true },
+          stock: { $gte: qty },
+          sizes: { $elemMatch: { size, stock: { $gte: qty } } },
+        },
+        { $inc: { stock: -qty, "sizes.$.stock": -qty } },
         session ? { session } : undefined,
       ).exec();
       if (result.modifiedCount !== 1) throw new HttpError(409, "Insufficient stock");
-      decremented.push([productId, qty]);
+      decremented.push([productId, size, qty]);
     }
   } catch (error) {
     if (!session) {
-      for (const [productId, qty] of decremented) {
-        await Product.updateOne({ _id: productId }, { $inc: { stock: qty } }).exec();
+      for (const [productId, size, qty] of decremented) {
+        await Product.updateOne(
+          { _id: productId, sizes: { $elemMatch: { size } } },
+          { $inc: { stock: qty, "sizes.$.stock": qty } },
+        ).exec();
       }
     }
     throw error;
   }
 }
 
-export async function restoreStock(items: Array<{ product: unknown; qty: number }>, session?: ClientSession): Promise<void> {
-  for (const [productId, qty] of aggregateOrderQuantities(items)) {
+export async function restoreStock(
+  items: Array<{ product: unknown; size: string; qty: number }>,
+  session?: ClientSession,
+): Promise<void> {
+  for (const { productId, size, qty } of aggregateOrderQuantities(items).values()) {
     await Product.updateOne(
-      { _id: productId },
-      { $inc: { stock: qty } },
+      { _id: productId, sizes: { $elemMatch: { size } } },
+      { $inc: { stock: qty, "sizes.$.stock": qty } },
       session ? { session } : undefined,
     ).exec();
   }
@@ -162,11 +174,11 @@ export async function reserveAndCreateOrder(
   }
 
   const price = await calculateCartPrice(input.userId, input.items, input.couponCode);
-  const decremented: Array<{ product: unknown; qty: number }> = [];
+  const decremented: Array<{ product: unknown; size: string; qty: number }> = [];
   let couponConsumed = false;
   try {
     await decrementStock(input.items);
-    decremented.push(...price.items.map(({ product, qty }) => ({ product, qty })));
+    decremented.push(...price.items.map(({ product, size, qty }) => ({ product, size, qty })));
     if (price.couponCode) {
       await consumeCoupon(price.couponCode, input.userId);
       couponConsumed = true;
@@ -208,19 +220,27 @@ export async function reserveAndCreateOrder(
   }
 }
 
-function aggregateQuantities(items: CartItemInput[]): Map<string, number> {
-  const quantities = new Map<string, number>();
-  for (const { productId, qty } of items) {
-    quantities.set(productId, (quantities.get(productId) ?? 0) + qty);
+function aggregateQuantities(items: CartItemInput[]): Map<string, { productId: string; size: string; qty: number }> {
+  const quantities = new Map<string, { productId: string; size: string; qty: number }>();
+  for (const { productId, size, qty } of items) {
+    const key = `${productId.toLowerCase()}\u0000${size}`;
+    const item = quantities.get(key) ?? { productId, size, qty: 0 };
+    item.qty += qty;
+    quantities.set(key, item);
   }
   return quantities;
 }
 
-function aggregateOrderQuantities(items: Array<{ product: unknown; qty: number }>): Map<string, number> {
-  const quantities = new Map<string, number>();
-  for (const { product, qty } of items) {
+function aggregateOrderQuantities(
+  items: Array<{ product: unknown; size: string; qty: number }>,
+): Map<string, { productId: string; size: string; qty: number }> {
+  const quantities = new Map<string, { productId: string; size: string; qty: number }>();
+  for (const { product, size, qty } of items) {
     const id = String(product);
-    quantities.set(id, (quantities.get(id) ?? 0) + qty);
+    const key = `${id.toLowerCase()}\u0000${size}`;
+    const item = quantities.get(key) ?? { productId: id, size, qty: 0 };
+    item.qty += qty;
+    quantities.set(key, item);
   }
   return quantities;
 }

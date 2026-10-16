@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import request from "supertest";
@@ -6,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { env } from "./config/env.js";
 import { app } from "./app.js";
 import { Product } from "./models/Product.js";
+import { Discount } from "./models/Discount.js";
 import { Order } from "./models/Order.js";
 import { User } from "./models/User.js";
 import { ContactMessage } from "./models/ContactMessage.js";
@@ -51,8 +53,23 @@ describe("API security boundary", () => {
       _id: new mongoose.Types.ObjectId(),
       slug: "test-saree",
       name: "Test saree",
+      category: "saree",
+      price: 1000,
+      mrp: 1200,
+      stock: 7,
+      costPrice: 125,
+      sizes: [{ size: "Free Size", stock: 7 }],
+      images: [
+        {
+          url: "/uploads/saree.webp",
+          key: "11111111-1111-4111-8111-111111111111.webp",
+          publicId: "private-upload-id",
+          alt: "Saree",
+          isPrimary: true,
+        },
+      ],
     };
-    vi.spyOn(Product, "find").mockReturnValue({
+    const findProducts = vi.spyOn(Product, "find").mockReturnValue({
       sort: () => ({
         skip: () => ({
           limit: () => ({
@@ -64,6 +81,28 @@ describe("API security boundary", () => {
     vi.spyOn(Product, "countDocuments").mockReturnValue({
       exec: async () => 1,
     } as never);
+    const flashSaleEndsAt = new Date(Date.now() + 60_000);
+    const discounts = [
+      {
+        _id: new mongoose.Types.ObjectId(),
+        name: "Catalog offer",
+        scope: "sitewide",
+        targets: [],
+        type: "percent",
+        value: 10,
+        startsAt: new Date(Date.now() - 60_000),
+        endsAt: flashSaleEndsAt,
+        isFlashSale: true,
+        priority: 1,
+        stackable: false,
+      },
+    ];
+    const discountQuery = {
+      sort: () => discountQuery,
+      lean: () => discountQuery,
+      exec: async () => discounts,
+    };
+    vi.spyOn(Discount, "find").mockReturnValue(discountQuery as never);
 
     const response = await request(app).get("/api/products?limit=1");
     expect(response.status).toBe(200);
@@ -73,6 +112,21 @@ describe("API security boundary", () => {
       limit: 1,
       total: 1,
     });
+    expect(findProducts).toHaveBeenCalledWith(
+      expect.objectContaining({ isActive: true, archived: { $ne: true } }),
+    );
+    expect(response.body.products[0]).not.toHaveProperty("costPrice");
+    expect(response.body.products[0].images[0]).toEqual({
+      url: "/uploads/saree.webp",
+      alt: "Saree",
+      isPrimary: true,
+    });
+    expect(response.body.products[0].images[0]).not.toHaveProperty("key");
+    expect(response.body.products[0].sizes).toEqual(["Free Size"]);
+    expect(response.body.products[0]).toMatchObject({ price: 900, originalPrice: 1200 });
+    expect(response.body.products[0].offerEndsAt).toBe(flashSaleEndsAt.toISOString());
+    expect(response.body.products[0]).not.toHaveProperty("archived");
+    expect(response.body.products[0]).not.toHaveProperty("createdBy");
 
     const tooMany = await request(app).get("/api/products?limit=51");
     expect(tooMany.status).toBe(400);
@@ -85,14 +139,30 @@ describe("API security boundary", () => {
       _id: new mongoose.Types.ObjectId(),
       slug: "test-saree",
       name: "Test saree",
+      costPrice: 125,
+      sizes: [{ size: "Free Size", stock: 7 }],
+      images: [
+        {
+          url: "/uploads/saree.webp",
+          key: "11111111-1111-4111-8111-111111111111.webp",
+          publicId: "private-upload-id",
+          alt: "Saree",
+          isPrimary: true,
+        },
+      ],
     };
-    vi.spyOn(Product, "findOne").mockReturnValue({
+    const findProduct = vi.spyOn(Product, "findOne").mockReturnValue({
       lean: () => ({ exec: async () => product }),
     } as never);
 
     const response = await request(app).get("/api/products/test-saree");
     expect(response.status).toBe(200);
     expect(response.body.product.slug).toBe("test-saree");
+    expect(response.body.product).not.toHaveProperty("costPrice");
+    expect(response.body.product.images[0]).not.toHaveProperty("publicId");
+    expect(findProduct).toHaveBeenCalledWith(
+      { slug: "test-saree", isActive: true, archived: { $ne: true } },
+    );
 
     const invalid = await request(app).get(`/api/products/${"a".repeat(201)}`);
     expect(invalid.status).toBe(400);
@@ -100,6 +170,13 @@ describe("API security boundary", () => {
 
   it("returns server-calculated cart pricing to guests and refuses guest coupons", async () => {
     const productId = new mongoose.Types.ObjectId();
+    const discountQuery = {
+      sort: () => discountQuery,
+      lean: () => discountQuery,
+      session: () => discountQuery,
+      exec: async () => [],
+    };
+    vi.spyOn(Discount, "find").mockReturnValue(discountQuery as never);
     vi.spyOn(Product, "find").mockReturnValue({
       exec: async () => [
         {
@@ -160,6 +237,63 @@ describe("API security boundary", () => {
         .send({});
       expect(response.status).toBe(401);
     }
+  });
+
+  it("keeps admin-only order notes hidden and defaults contact workflow flags", () => {
+    expect(Order.schema.path("adminNotes")?.options.select).toBe(false);
+    const message = new ContactMessage({
+      name: "Customer",
+      email: "customer@example.com",
+      message: "A question",
+    });
+    expect(message.isRead).toBe(false);
+    expect(message.isResolved).toBe(false);
+    expect(ContactMessage.schema.path("isRead")?.options.index).toBe(true);
+    expect(ContactMessage.schema.path("isResolved")?.options.index).toBe(true);
+    expect(new User({ name: "Customer", email: "customer@example.com" }).isBlocked).toBe(false);
+  });
+
+  it("rejects a blocked user's valid password with a generic account-unavailable response", async () => {
+    const user = {
+      _id: new mongoose.Types.ObjectId(),
+      passwordHash: "hashed-password",
+      failedLoginAttempts: 0,
+      isBlocked: true,
+    };
+    vi.spyOn(User, "findOne").mockReturnValue({
+      select: () => ({ exec: async () => user }),
+    } as never);
+    vi.spyOn(bcrypt, "compare").mockResolvedValue(true);
+    const updateUser = vi.spyOn(User, "updateOne");
+    const csrf = await getCsrfCredentials();
+
+    const response = await request(app)
+      .post("/api/auth/login")
+      .set("Cookie", csrf.cookies)
+      .set("x-csrf-token", csrf.token)
+      .send({ email: "blocked@example.com", password: "correct-password" });
+
+    expect(response.status).toBe(401);
+    expect(response.body).toEqual({ error: "Account unavailable" });
+    expect(updateUser).not.toHaveBeenCalled();
+  });
+
+  it("does not restore an existing session for a blocked user", async () => {
+    const id = new mongoose.Types.ObjectId();
+    const accessToken = jwt.sign(
+      { sub: id.toString(), role: "user", type: "access" },
+      env.JWT_SECRET,
+      { expiresIn: "15m", issuer: "iyalvi-api", audience: "iyalvi-client" },
+    );
+    vi.spyOn(User, "findById").mockReturnValue({
+      select: () => ({
+        lean: () => ({ exec: async () => ({ _id: id, role: "user", isBlocked: true }) }),
+      }),
+    } as never);
+
+    const response = await request(app).get("/api/wishlist").set("Cookie", `accessToken=${accessToken}`);
+
+    expect(response.status).toBe(401);
   });
 
   it("does not count anonymous session restoration checks against the login-attempt limit", async () => {

@@ -46,10 +46,20 @@ export interface ApiProduct {
   fabric: string;
   occasion: string;
   colors: string[];
-  sizes: string[];
+  sizes: Array<string | { size: string; stock: number }>;
   price: number;
   mrp: number;
-  images: string[];
+  originalPrice?: number;
+  offerEndsAt?: string;
+  images: Array<
+    | string
+    | {
+        url: string;
+        alt?: string;
+        isPrimary: boolean;
+        thumbnailUrl?: string;
+      }
+  >;
   stock: number;
   isActive: boolean;
   craft?: string;
@@ -205,6 +215,8 @@ export async function getAllProducts(
 
 export function productFromApi(product: ApiProduct): Product {
   const category: Product["category"] = product.category === "saree" ? "Sarees" : "Kurtis";
+  const images = product.images.map((image) => (typeof image === "string" ? image : image.url));
+  const sizes = product.sizes.map((size) => (typeof size === "string" ? size : size.size));
   return {
     id: product._id,
     name: product.name,
@@ -213,13 +225,17 @@ export function productFromApi(product: ApiProduct): Product {
     occasion: product.occasion as Product["occasion"],
     colors: [...product.colors],
     craftOrigin: product.craftOrigin ?? "",
-    sizes: [...product.sizes],
-    image: product.images[0] ?? "",
-    unsplashImage: product.images[0] ?? "",
+    sizes,
+    image: images[0] ?? "",
+    images,
+    unsplashImage: images[0] ?? "",
     craft: product.craft ?? product.subCategory,
     category,
     subcategory: product.subCategory as Product["subcategory"],
-    ...(product.mrp > product.price && { originalPrice: product.mrp }),
+    ...((product.originalPrice ?? product.mrp) > product.price && {
+      originalPrice: product.originalPrice ?? product.mrp,
+    }),
+    ...(product.offerEndsAt && { offerEndsAt: product.offerEndsAt }),
   };
 }
 

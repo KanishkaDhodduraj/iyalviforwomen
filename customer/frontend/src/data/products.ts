@@ -27,6 +27,7 @@ export type Product = {
   craftOrigin: string;
   sizes: string[];
   image: string;
+  images?: string[];
   unsplashImage: string;
   craft: string;
   category: ProductCategory;
