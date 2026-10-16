@@ -1,0 +1,266 @@
+import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
+import request from "supertest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { env } from "./config/env.js";
+import { app } from "./app.js";
+import { Product } from "./models/Product.js";
+import { Order } from "./models/Order.js";
+import { User } from "./models/User.js";
+import { ContactMessage } from "./models/ContactMessage.js";
+
+async function getCsrfCredentials() {
+  const response = await request(app).get("/api/auth/csrf");
+  return {
+    token: response.body.csrfToken as string,
+    cookies: response.headers["set-cookie"] as string[],
+  };
+}
+
+describe("API security boundary", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("returns only service and database status from health", async () => {
+    const response = await request(app)
+      .get("/api/health")
+      .set("Origin", "http://localhost:8080");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ status: "ok", db: "disconnected" });
+    expect(response.headers["x-powered-by"]).toBeUndefined();
+    expect(response.headers["access-control-allow-origin"]).toBe(
+      "http://localhost:8080",
+    );
+    expect(response.headers["access-control-allow-credentials"]).toBe("true");
+  });
+
+  it("rejects unknown query fields and disallowed browser origins", async () => {
+    const unknownQuery = await request(app).get("/api/health?unexpected=value");
+    expect(unknownQuery.status).toBe(400);
+
+    const disallowedOrigin = await request(app)
+      .get("/api/health")
+      .set("Origin", "https://attacker.example");
+    expect(disallowedOrigin.status).toBe(403);
+    expect(disallowedOrigin.body).toEqual({ error: "Origin not allowed" });
+  });
+
+  it("serves a product catalog to guests with strict query validation and a capped page size", async () => {
+    const product = {
+      _id: new mongoose.Types.ObjectId(),
+      slug: "test-saree",
+      name: "Test saree",
+    };
+    vi.spyOn(Product, "find").mockReturnValue({
+      sort: () => ({
+        skip: () => ({
+          limit: () => ({
+            lean: () => ({ exec: async () => [product] }),
+          }),
+        }),
+      }),
+    } as never);
+    vi.spyOn(Product, "countDocuments").mockReturnValue({
+      exec: async () => 1,
+    } as never);
+
+    const response = await request(app).get("/api/products?limit=1");
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      products: [{ slug: "test-saree" }],
+      page: 1,
+      limit: 1,
+      total: 1,
+    });
+
+    const tooMany = await request(app).get("/api/products?limit=51");
+    expect(tooMany.status).toBe(400);
+    const unknown = await request(app).get("/api/products?unexpected=value");
+    expect(unknown.status).toBe(400);
+  });
+
+  it("serves product details to guests and validates the slug", async () => {
+    const product = {
+      _id: new mongoose.Types.ObjectId(),
+      slug: "test-saree",
+      name: "Test saree",
+    };
+    vi.spyOn(Product, "findOne").mockReturnValue({
+      lean: () => ({ exec: async () => product }),
+    } as never);
+
+    const response = await request(app).get("/api/products/test-saree");
+    expect(response.status).toBe(200);
+    expect(response.body.product.slug).toBe("test-saree");
+
+    const invalid = await request(app).get(`/api/products/${"a".repeat(201)}`);
+    expect(invalid.status).toBe(400);
+  });
+
+  it("returns server-calculated cart pricing to guests and refuses guest coupons", async () => {
+    const productId = new mongoose.Types.ObjectId();
+    vi.spyOn(Product, "find").mockReturnValue({
+      exec: async () => [
+        {
+          _id: productId,
+          name: "Test saree",
+          sizes: ["S"],
+          colors: ["Black"],
+          stock: 3,
+          price: 500,
+        },
+      ],
+    } as never);
+    const csrf = await getCsrfCredentials();
+    const cart = {
+      items: [
+        { productId: productId.toString(), size: "S", color: "Black", qty: 1 },
+      ],
+    };
+
+    const priced = await request(app)
+      .post("/api/cart/price")
+      .set("Cookie", csrf.cookies)
+      .set("x-csrf-token", csrf.token)
+      .send(cart);
+    expect(priced.status).toBe(200);
+    expect(priced.body).toMatchObject({
+      subtotal: 500,
+      discount: 0,
+      shipping: 99,
+      total: 599,
+    });
+
+    const invalidCart = await request(app)
+      .post("/api/cart/price")
+      .set("Cookie", csrf.cookies)
+      .set("x-csrf-token", csrf.token)
+      .send({ ...cart, clientPrice: 1 });
+    expect(invalidCart.status).toBe(400);
+
+    const guestCoupon = await request(app)
+      .post("/api/cart/price")
+      .set("Cookie", csrf.cookies)
+      .set("x-csrf-token", csrf.token)
+      .send({ ...cart, couponCode: "GUEST10" });
+    expect(guestCoupon.status).toBe(401);
+  });
+
+  it("keeps wishlist and address reads protected", async () => {
+    expect((await request(app).get("/api/wishlist")).status).toBe(401);
+    expect((await request(app).get("/api/addresses")).status).toBe(401);
+
+    const csrf = await getCsrfCredentials();
+    for (const path of ["/api/coupons/validate", "/api/offers/spin"]) {
+      const response = await request(app)
+        .post(path)
+        .set("Cookie", csrf.cookies)
+        .set("x-csrf-token", csrf.token)
+        .send({});
+      expect(response.status).toBe(401);
+    }
+  });
+
+  it("does not count anonymous session restoration checks against the login-attempt limit", async () => {
+    const responses = await Promise.all(
+      Array.from({ length: 11 }, () => request(app).get("/api/auth/me")),
+    );
+    expect(responses.every((response) => response.status === 401)).toBe(true);
+  });
+
+  it("rejects NoSQL operator keys in query and body data", async () => {
+    const queryInjection = await request(app).get("/api/health?%24where=value");
+    expect(queryInjection.status).toBe(400);
+
+    const bodyInjection = await request(app).post("/api/does-not-exist").send({
+      email: "person@example.com",
+      $where: "this.passwordHash",
+    });
+    expect(bodyInjection.status).toBe(400);
+    expect(bodyInjection.body).toEqual({ error: "Invalid request" });
+  });
+
+  it("returns a generic not-found response without a stack trace", async () => {
+    const response = await request(app).get("/api/does-not-exist");
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: "Not found" });
+    expect(JSON.stringify(response.body)).not.toContain("stack");
+  });
+
+  it("keeps Google sign-in disabled without a Google authentication dependency", async () => {
+    const csrf = await request(app).get("/api/auth/csrf");
+    const token = csrf.body.csrfToken as string;
+    const cookies = csrf.headers["set-cookie"] as string[];
+    const response = await request(app)
+      .post("/api/auth/google")
+      .set("Cookie", cookies)
+      .set("x-csrf-token", token)
+      .send({ idToken: "unused-token" });
+
+    expect(response.status).toBe(501);
+    expect(response.body).toEqual({ error: "Google sign-in is unavailable" });
+  });
+
+  it("validates and stores contact messages behind the CSRF and rate-limit boundary", async () => {
+    const csrf = await request(app).get("/api/auth/csrf");
+    const token = csrf.body.csrfToken as string;
+    const cookies = csrf.headers["set-cookie"] as string[];
+    const create = vi
+      .spyOn(ContactMessage, "create")
+      .mockResolvedValue({} as never);
+    const response = await request(app)
+      .post("/api/contact")
+      .set("Cookie", cookies)
+      .set("x-csrf-token", token)
+      .send({
+        name: "Test customer",
+        email: "customer@example.com",
+        message: "Please help with an order.",
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body).toEqual({ received: true });
+    expect(create).toHaveBeenCalledWith({
+      name: "Test customer",
+      email: "customer@example.com",
+      message: "Please help with an order.",
+    });
+
+    const invalid = await request(app)
+      .post("/api/contact")
+      .set("Cookie", cookies)
+      .set("x-csrf-token", token)
+      .send({
+        name: "Test customer",
+        email: "customer@example.com",
+        message: "Short",
+        unexpected: true,
+      });
+    expect(invalid.status).toBe(400);
+  });
+
+  it("returns 404 when an authenticated user requests another user's order", async () => {
+    const userId = new mongoose.Types.ObjectId();
+    vi.spyOn(User, "findById").mockReturnValue({
+      select: () => ({
+        lean: () => ({ exec: async () => ({ _id: userId, role: "user" }) }),
+      }),
+    } as never);
+    vi.spyOn(Order, "findOne").mockReturnValue({
+      exec: async () => null,
+    } as never);
+    const token = jwt.sign(
+      { sub: userId.toString(), role: "user", type: "access" },
+      env.JWT_SECRET,
+      { issuer: "iyalvi-api", audience: "iyalvi-client", expiresIn: "15m" },
+    );
+
+    const response = await request(app)
+      .get(`/api/orders/${new mongoose.Types.ObjectId().toString()}`)
+      .set("Cookie", `accessToken=${token}`);
+
+    expect(response.status).toBe(404);
+    expect(response.body).toEqual({ error: "Order not found" });
+  });
+});
