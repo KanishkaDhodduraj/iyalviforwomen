@@ -10,6 +10,21 @@ describe("AdminApiClient", () => {
   afterEach(() => {
     document.cookie = "admin_csrf=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("binds the browser fetch function to its global object", async () => {
+    const fetcher = vi.fn<typeof fetch>(function (this: typeof globalThis) {
+      expect(this).toBe(globalThis);
+      return Promise.resolve(ok({ admin: { id: "a1", email: "admin@example.com", role: "manager" } }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const client = new AdminApiClient();
+
+    await expect(client.get("/auth/me")).resolves.toMatchObject({
+      admin: { id: "a1", role: "manager" },
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
   });
 
   it("sends cookies and CSRF headers, then refreshes and retries an expired session once", async () => {

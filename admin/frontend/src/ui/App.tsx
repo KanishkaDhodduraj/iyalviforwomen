@@ -6,7 +6,7 @@ import {
   Moon, PackageCheck, Settings, ShieldCheck, Sun, TicketPercent, UsersRound, Wallet, X,
 } from "lucide-react";
 import { authApi } from "../api";
-import { authKey, LoginPage, ProtectedRoute, useAdmin } from "../auth";
+import { authKey, localAutoLoginDisabledKey, LoginPage, ProtectedRoute, useAdmin } from "../auth";
 import {
   AuditPage, CustomerDetailPage, CustomersPage, DashboardPage, DiscountsPage, MessagesPage,
   OrderDetailPage, OrdersPage, PaymentsPage, ProductEditorPage, ProductsPage, ReportsPage,
@@ -45,6 +45,7 @@ function AdminLayout() {
     location.pathname.startsWith("/orders/") ? "Order details" : location.pathname.startsWith("/customers/") ? "Customer details" : "Product editor"
   );
   async function logout() {
+    if (import.meta.env.DEV) sessionStorage.setItem(localAutoLoginDisabledKey, "true");
     try { await authApi.logout(); } catch { /* The secure server session may already be unavailable. */ }
     cache.setQueryData(authKey, null);
     await cache.invalidateQueries({ queryKey: authKey });

@@ -7,12 +7,26 @@ import { ArrowRight, LockKeyhole } from "lucide-react";
 import { ApiError, authApi, loginInputSchema, type AdminUser } from "./api";
 
 export const authKey = ["auth", "me"] as const;
+export const localAutoLoginDisabledKey = "admin-local-auto-login-disabled";
 export type LoginFields = z.infer<typeof loginInputSchema>;
 
 export function useAdmin() {
   return useQuery({
     queryKey: authKey,
-    queryFn: async () => (await authApi.me()).admin,
+    queryFn: async () => {
+      try {
+        return (await authApi.me()).admin;
+      } catch (error) {
+        if (
+          !import.meta.env.DEV ||
+          sessionStorage.getItem(localAutoLoginDisabledKey) === "true" ||
+          !(error instanceof ApiError) ||
+          error.status !== 401
+        ) throw error;
+        await authApi.devLogin();
+        return (await authApi.me()).admin;
+      }
+    },
     retry: false,
     staleTime: 60_000,
   });
@@ -31,6 +45,7 @@ export function ProtectedRoute() {
 export function LoginPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const auth = useAdmin();
   const form = useForm<LoginFields>({
     resolver: zodResolver(loginInputSchema),
     defaultValues: { email: "", password: "" },
@@ -39,12 +54,16 @@ export function LoginPage() {
     form.clearErrors("root");
     try {
       const result = await authApi.login(values.email, values.password);
+      sessionStorage.removeItem(localAutoLoginDisabledKey);
       queryClient.setQueryData<AdminUser>(authKey, result.admin);
       await navigate("/", { replace: true });
     } catch (error) {
       form.setError("root", { message: error instanceof Error ? error.message : "Sign-in failed. Please try again." });
     }
   });
+  if (auth.isLoading) return <div className="auth-loading"><span className="spinner" />Verifying secure session…</div>;
+  if (auth.data) return <Navigate to="/" replace />;
+  const authIssue = auth.isError && auth.error instanceof Error ? auth.error.message : undefined;
   return (
     <main className="login-shell">
       <form className="login-card" onSubmit={onSubmit}>
@@ -58,6 +77,7 @@ export function LoginPage() {
         <label htmlFor="password">Password</label>
         <input id="password" autoComplete="current-password" type="password" {...form.register("password")} />
         {form.formState.errors.password && <small className="field-error">{form.formState.errors.password.message}</small>}
+        {authIssue && <p role="alert" className="inline-error">{authIssue}</p>}
         {form.formState.errors.root && <p role="alert" className="inline-error">{form.formState.errors.root.message}</p>}
         <button className="primary-button login-button" disabled={form.formState.isSubmitting}>
           {form.formState.isSubmitting ? "Signing in…" : "Sign in"} {form.formState.isSubmitting ? <LockKeyhole size={16} /> : <ArrowRight size={17} />}

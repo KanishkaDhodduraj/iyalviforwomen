@@ -41,6 +41,9 @@ random `ADMIN_JWT_SECRET` of at least 32 characters. Set `ADMIN_CLIENT_URL` to
 `http://localhost:8090` for local development. Bootstrap the first superadmin by supplying
 `ADMIN_EMAIL` and `ADMIN_PASSWORD` in the admin backend environment and running
 `npm --prefix admin/backend run create-admin`. There is no public admin registration.
+In local development, the admin frontend automatically creates a session for the configured
+superadmin account; this shortcut is available only on loopback and is disabled outside
+development. Production continues to require the admin email and password.
 
 The admin frontend has its own `admin/frontend/.env.example`. Credentials and sessions are
 handled by the admin API using httpOnly cookies; no authentication tokens are stored in browser

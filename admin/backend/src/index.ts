@@ -6,7 +6,12 @@ import { startPromotionExpiryScheduler } from "./services/promotionExpiry.js";
 try {
   await connectDatabase();
   startPromotionExpiryScheduler();
-  app.listen(env.PORT, () => console.info(`Admin API listening on port ${env.PORT}`));
+  const onListening = () => console.info(`Admin API listening on port ${env.PORT}`);
+  if (env.NODE_ENV === "development") {
+    app.listen(env.PORT, "127.0.0.1", onListening);
+  } else {
+    app.listen(env.PORT, onListening);
+  }
 } catch (error) {
   const errorType = error instanceof Error ? error.name : "UnknownError";
   console.error(`Unable to start admin API: database connection failed (${errorType})`);
