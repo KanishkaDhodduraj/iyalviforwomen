@@ -9,6 +9,7 @@ import {
   type ErrorComponentProps,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+import { FloatingOffer } from "@/components/iyalvi/floating-offer";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -78,11 +79,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "IYALVI — Threads of Tradition" },
-      { name: "description", content: "Indian heritage, woven with love." },
+      { title: "IYALVI — Everyday style, effortlessly yours" },
+      { name: "description", content: "Easy-to-wear styles for everyday plans and big moments." },
       { name: "author", content: "IYALVI" },
-      { property: "og:title", content: "IYALVI — Threads of Tradition" },
-      { property: "og:description", content: "Woven in Heritage. Worn in Grace." },
+      { property: "og:title", content: "IYALVI — Everyday style, effortlessly yours" },
+      { property: "og:description", content: "From brunch to big days, find your kind of style." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -124,6 +125,7 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
+      <FloatingOffer />
     </QueryClientProvider>
   );
 }

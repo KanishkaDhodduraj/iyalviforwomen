@@ -13,7 +13,7 @@ export function LoomLoader() {
     const timer = setTimeout(() => setVisible(false), 2500);
     return () => clearTimeout(timer);
   }, [reduced]);
-  return <AnimatePresence>{visible && <motion.div className="loom-loader" initial={{ opacity: 1 }} exit={{ clipPath: 'inset(0 0 100% 0)' }} transition={{ duration: .7 }}><div className="loom-threads">{Array.from({length: 14}, (_,i) => <span key={i}/>)}</div><motion.div initial={{opacity:0,y:15}} animate={{opacity:1,y:0}} transition={{delay:.5}}><Brand/><p>Woven in Heritage. Worn in Grace.</p></motion.div><Button variant="ghost" onClick={() => setVisible(false)} className="loader-skip">Skip introduction →</Button></motion.div>}</AnimatePresence>;
+  return <AnimatePresence>{visible && <motion.div className="loom-loader" initial={{ opacity: 1 }} exit={{ clipPath: 'inset(0 0 100% 0)' }} transition={{ duration: .7 }}><div className="loom-threads">{Array.from({length: 14}, (_,i) => <span key={i}/>)}</div><motion.div initial={{opacity:0,y:15}} animate={{opacity:1,y:0}} transition={{delay:.5}}><Brand/><p>Everyday style, effortlessly yours.</p></motion.div><Button variant="ghost" onClick={() => setVisible(false)} className="loader-skip">Skip intro →</Button></motion.div>}</AnimatePresence>;
 }
 
 export function KolamCursor() {
@@ -33,7 +33,7 @@ export function KolamCursor() {
     document.addEventListener('mouseleave', hide);
     return () => { window.removeEventListener('mousemove', handler); document.removeEventListener('mouseleave', hide); };
   }, []);
-  return <div ref={ref} className="kolam-cursor" aria-hidden="true"><span/><small>Drape</small><i/><i/><i/></div>;
+  return <div ref={ref} className="kolam-cursor" aria-hidden="true"><span/><small>Explore</small><i/><i/><i/></div>;
 }
 
 export function PleatReveal({ value }: { value: string }) {
