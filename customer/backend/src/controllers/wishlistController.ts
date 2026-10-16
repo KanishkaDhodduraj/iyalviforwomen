@@ -11,7 +11,7 @@ export const emptyBody = z.object({}).strict();
 
 export const getWishlist: RequestHandler = async (request, response) => {
   const wishlist = await Wishlist.findOne({ user: authUserId(request) })
-    .populate({ path: "products", match: { isActive: true } })
+    .populate({ path: "products", match: { isActive: true, archived: { $ne: true } } })
     .lean()
     .exec();
   response.json({ products: wishlist?.products ?? [] });
@@ -19,7 +19,7 @@ export const getWishlist: RequestHandler = async (request, response) => {
 
 export const addWishlistProduct: RequestHandler = async (request, response) => {
   const { productId } = productIdParams.parse(request.params);
-  const product = await Product.exists({ _id: productId, isActive: true }).exec();
+  const product = await Product.exists({ _id: productId, isActive: true, archived: { $ne: true } }).exec();
   if (!product) throw new HttpError(404, "Product not found");
   const user = authUserId(request);
   await Wishlist.updateOne({ user }, { $addToSet: { products: product._id } }, { upsert: true }).exec();

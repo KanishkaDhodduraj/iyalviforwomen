@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { HttpError } from "../middleware/errors.js";
 import { Product } from "../models/Product.js";
+import { findActiveDiscounts, priceWithDiscounts, selectApplicableDiscounts, type DiscountCandidate } from "../services/discounts.js";
 
 export const productListQuery = z
   .object({
@@ -28,7 +29,7 @@ export const listProducts: RequestHandler = async (request, response) => {
   if (query.minPrice !== undefined && query.maxPrice !== undefined && query.minPrice > query.maxPrice) {
     throw new HttpError(400, "Invalid price range");
   }
-  const filter: Record<string, unknown> = { isActive: true };
+  const filter: Record<string, unknown> = { isActive: true, archived: { $ne: true } };
   if (query.category) filter.category = query.category;
   if (query.subCategory) filter.subCategory = new RegExp(escapeRegex(query.subCategory), "i");
   if (query.fabric) filter.fabric = new RegExp(escapeRegex(query.fabric), "i");
@@ -55,15 +56,98 @@ export const listProducts: RequestHandler = async (request, response) => {
       .exec(),
     Product.countDocuments(filter).exec(),
   ]);
-  response.json({ products, page: query.page, limit: query.limit, total });
+  const activeDiscounts = products.some(hasPrice) ? await findActiveDiscounts() : [];
+  response.json({
+    products: products.map((product) => customerProduct(product, activeDiscounts)),
+    page: query.page,
+    limit: query.limit,
+    total,
+  });
 };
 
 export const getProduct: RequestHandler = async (request, response) => {
   const { slug } = productSlugParams.parse(request.params);
-  const product = await Product.findOne({ slug, isActive: true }).lean().exec();
+  const product = await Product.findOne({ slug, isActive: true, archived: { $ne: true } }).lean().exec();
   if (!product) throw new HttpError(404, "Product not found");
-  response.json({ product });
+  const activeDiscounts = hasPrice(product) ? await findActiveDiscounts() : [];
+  response.json({ product: customerProduct(product, activeDiscounts) });
 };
+
+type ProductRecord = Record<string, unknown> & {
+  _id: unknown;
+  category?: string;
+  price?: number;
+  mrp?: number;
+};
+
+function hasPrice(product: ProductRecord): product is ProductRecord & { category: string; price: number } {
+  return typeof product.price === "number" && typeof product.category === "string";
+}
+
+function customerProduct(product: ProductRecord, activeDiscounts: DiscountCandidate[]) {
+  const result: Record<string, unknown> = {
+    _id: product._id,
+    slug: product.slug,
+    name: product.name,
+    description: product.description,
+    category: product.category,
+    subCategory: product.subCategory,
+    fabric: product.fabric,
+    occasion: product.occasion,
+    colors: product.colors,
+    sizes: customerSizes(product.sizes),
+    price: product.price,
+    mrp: product.mrp,
+    images: customerImages(product.images),
+    stock: product.stock,
+    isFeatured: product.isFeatured,
+    tags: product.tags,
+  };
+  if (!hasPrice(product)) return result;
+
+  const selected = selectApplicableDiscounts(
+    activeDiscounts,
+    {
+      id: String(product._id).toLowerCase(),
+      ...(typeof product.slug === "string" && { slug: product.slug }),
+      category: product.category,
+      ...(typeof product.subCategory === "string" && { collection: product.subCategory }),
+    },
+  );
+  const priced = priceWithDiscounts(product.price, selected);
+  result.price = priced.price;
+  result.originalPrice = Math.max(product.price, typeof product.mrp === "number" ? product.mrp : product.price);
+  const flashSaleEndsAt = selected
+    .filter((discount) => discount.isFlashSale)
+    .map((discount) => new Date(discount.endsAt).toISOString())
+    .sort()[0];
+  if (flashSaleEndsAt) result.offerEndsAt = flashSaleEndsAt;
+  return result;
+}
+
+function customerImages(images: unknown): unknown[] {
+  if (!Array.isArray(images)) return [];
+  return images.map((image) => {
+    if (typeof image === "string") return image;
+    if (typeof image !== "object" || image === null) return null;
+    const record = image as Record<string, unknown>;
+    return {
+      url: record.url,
+      alt: record.alt,
+      isPrimary: record.isPrimary,
+      ...(typeof record.thumbnailUrl === "string" && { thumbnailUrl: record.thumbnailUrl }),
+    };
+  }).filter((image) => image !== null);
+}
+
+function customerSizes(sizes: unknown): string[] {
+  if (!Array.isArray(sizes)) return [];
+  return sizes.flatMap((size) => {
+    if (typeof size === "string") return [size];
+    if (typeof size !== "object" || size === null || !("size" in size)) return [];
+    return typeof size.size === "string" ? [size.size] : [];
+  });
+}
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

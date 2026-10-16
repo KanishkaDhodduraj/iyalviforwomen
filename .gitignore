@@ -18,8 +18,16 @@ dist-ssr
 .tanstack/**
 .nitro
 *.local
+*.tsbuildinfo
 .vercel/
 **/.vercel/
+
+# Uploaded product assets are local-only; keep the storage placeholders.
+uploads/*
+!uploads/.gitkeep
+!uploads/products/
+uploads/products/*
+!uploads/products/.gitkeep
 
 # Environment files
 .env*

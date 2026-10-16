@@ -6,6 +6,8 @@ import mongoSanitize from "express-mongo-sanitize";
 import helmet from "helmet";
 import hpp from "hpp";
 import mongoose from "mongoose";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { env } from "./config/env.js";
 import { authRouter } from "./routes/authRoutes.js";
@@ -23,6 +25,7 @@ import { validateRequest } from "./middleware/validate.js";
 import { z } from "zod";
 
 export const app = express();
+const productUploadDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../../../uploads");
 
 app.disable("x-powered-by");
 app.set("trust proxy", env.TRUST_PROXY);
@@ -59,6 +62,17 @@ app.use((request, _response, next) => {
 app.use(hpp());
 app.use(globalRateLimit);
 app.use(csrfProtection);
+app.use(
+  "/uploads",
+  express.static(productUploadDirectory, {
+    dotfiles: "deny",
+    fallthrough: false,
+    index: false,
+    setHeaders(response) {
+      response.setHeader("X-Content-Type-Options", "nosniff");
+    },
+  }),
+);
 
 app.get("/api/health", validateRequest({ query: z.object({}).strict() }), (_request, response) => {
   response.json({

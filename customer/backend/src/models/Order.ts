@@ -8,6 +8,23 @@ const orderItemSchema = new Schema(
     color: { type: String, required: true },
     qty: { type: Number, required: true, min: 1, max: 10 },
     unitPrice: { type: Number, required: true, min: 0 },
+    originalUnitPrice: { type: Number, required: true, min: 0 },
+    discountAmount: { type: Number, required: true, min: 0, default: 0 },
+    discounts: {
+      type: [
+        new Schema(
+          {
+            discountId: { type: String, required: true },
+            name: { type: String, required: true },
+            type: { type: String, required: true, enum: ["percent", "flat"] },
+            value: { type: Number, required: true, min: 0 },
+            amount: { type: Number, required: true, min: 0 },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
   },
   { _id: false },
 );
@@ -21,6 +38,25 @@ const addressSnapshotSchema = new Schema(
     city: { type: String, required: true },
     state: { type: String, required: true },
     pincode: { type: String, required: true, match: /^\d{6}$/ },
+  },
+  { _id: false },
+);
+
+const statusHistorySchema = new Schema(
+  {
+    status: { type: String, enum: ["placed", "packed", "shipped", "delivered", "cancelled"], required: true },
+    changedBy: { type: Schema.Types.ObjectId, ref: "AdminUser", required: true },
+    at: { type: Date, required: true, default: Date.now },
+    note: { type: String, trim: true, maxlength: 1000 },
+  },
+  { _id: false },
+);
+
+const adminNoteSchema = new Schema(
+  {
+    note: { type: String, required: true, trim: true, maxlength: 2000 },
+    addedBy: { type: Schema.Types.ObjectId, ref: "AdminUser", required: true },
+    at: { type: Date, required: true, default: Date.now },
   },
   { _id: false },
 );
@@ -53,6 +89,15 @@ const orderSchema = new Schema(
       required: true,
       default: "placed",
     },
+    statusHistory: { type: [statusHistorySchema], default: [] },
+    adminNotes: { type: [adminNoteSchema], default: [], select: false },
+    trackingNumber: { type: String, trim: true, maxlength: 120 },
+    courier: { type: String, trim: true, maxlength: 120 },
+    refundStatus: { type: String, enum: ["none", "pending", "refunded", "failed"], default: "none", required: true },
+    refundAmount: { type: Number, min: 0, default: 0, required: true },
+    refundReason: { type: String, trim: true, maxlength: 1000 },
+    refundedAt: { type: Date },
+    refundedBy: { type: Schema.Types.ObjectId, ref: "AdminUser" },
     razorpayOrderId: { type: String },
     razorpayPaymentId: { type: String },
     idempotencyKey: { type: String, select: false },
@@ -61,6 +106,9 @@ const orderSchema = new Schema(
 );
 
 orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ orderStatus: 1, createdAt: -1 });
+orderSchema.index({ paymentStatus: 1, createdAt: -1 });
+orderSchema.index({ trackingNumber: 1 }, { sparse: true });
 orderSchema.index(
   { user: 1, idempotencyKey: 1 },
   { unique: true, partialFilterExpression: { idempotencyKey: { $type: "string" } } },

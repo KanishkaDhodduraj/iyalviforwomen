@@ -36,8 +36,8 @@ async function attachAuth(request: Express.Request): Promise<boolean> {
   } catch {
     return false;
   }
-  const user = await User.findById(claims.sub).select("role").lean().exec();
-  if (!user) return false;
+  const user = await User.findById(claims.sub).select("role isBlocked").lean().exec();
+  if (!user || user.isBlocked) return false;
   (request as AuthenticatedRequest).auth = {
     id: String(user._id),
     role: user.role === "admin" ? "admin" : "user",

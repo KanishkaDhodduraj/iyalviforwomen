@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, apiProductForCartItem, apiRequest, getAllProducts, type ApiProduct } from "./api";
+import {
+  api,
+  apiProductForCartItem,
+  apiRequest,
+  getAllProducts,
+  productFromApi,
+  type ApiProduct,
+} from "./api";
 
 const jsonResponse = (status: number, body?: unknown) =>
   ({
@@ -83,6 +90,36 @@ describe("API client", () => {
     expect(apiProductForCartItem("iy-001", [seededProduct])).toBe(seededProduct);
     expect(apiProductForCartItem(seededProduct._id, [seededProduct])).toBe(seededProduct);
     expect(apiProductForCartItem("iy-010", [seededProduct])).toBeUndefined();
+  });
+
+  it("maps discounted catalog prices and preserves image gallery order", () => {
+    const product = productFromApi({
+      _id: "507f1f77bcf86cd799439011",
+      slug: "mayil-saree",
+      name: "Mayil Saree",
+      category: "saree",
+      subCategory: "Silk",
+      fabric: "Silk",
+      occasion: "Wedding",
+      colors: ["Teal"],
+      sizes: ["Free Size"],
+      price: 720,
+      mrp: 1000,
+      originalPrice: 1000,
+      offerEndsAt: "2026-10-16T12:00:00.000Z",
+      images: [
+        { url: "/products/front.webp", alt: "Front view", isPrimary: true },
+        { url: "/products/pallu.webp", alt: "Pallu detail", isPrimary: false },
+      ],
+      stock: 4,
+      isActive: true,
+    } as ApiProduct);
+
+    expect(product.price).toBe(720);
+    expect(product.originalPrice).toBe(1000);
+    expect(product.image).toBe("/products/front.webp");
+    expect(product.images).toEqual(["/products/front.webp", "/products/pallu.webp"]);
+    expect(product.offerEndsAt).toBe("2026-10-16T12:00:00.000Z");
   });
 
   it("loads every product page for checkout and filters", async () => {

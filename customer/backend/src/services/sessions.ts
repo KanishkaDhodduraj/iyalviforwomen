@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 
 import { env } from "../config/env.js";
 import type { AuthenticatedRequest } from "../middleware/auth.js";
+import { HttpError } from "../middleware/errors.js";
 import { User } from "../models/User.js";
 
 const accessCookieOptions = {
@@ -27,9 +28,10 @@ export function authUserId(request: Request): string {
 }
 
 export async function issueSession(
-  user: { _id: unknown; role: "user" | "admin" },
+  user: { _id: unknown; role: "user" | "admin"; isBlocked?: boolean },
   response: Response,
 ): Promise<void> {
+  if (user.isBlocked) throw new HttpError(401, "Account unavailable");
   const id = String(user._id);
   const accessToken = jwt.sign({ sub: id, role: user.role, type: "access" }, env.JWT_SECRET, {
     expiresIn: "15m",
@@ -41,8 +43,8 @@ export async function issueSession(
     env.JWT_SECRET,
     { expiresIn: "7d", issuer: "iyalvi-api", audience: "iyalvi-client" },
   );
-  await User.updateOne(
-    { _id: user._id },
+  const updated = await User.updateOne(
+    { _id: user._id, isBlocked: { $ne: true } },
     {
       $set: {
         refreshTokenHash: digest(refreshToken),
@@ -50,6 +52,7 @@ export async function issueSession(
       },
     },
   );
+  if (updated.modifiedCount !== 1) throw new HttpError(401, "Account unavailable");
   response.cookie("accessToken", accessToken, { ...accessCookieOptions, maxAge: 15 * 60 * 1000 });
   response.cookie("refreshToken", refreshToken, {
     ...refreshCookieOptions,
@@ -77,6 +80,7 @@ export async function rotateSession(refreshToken: string, response: Response): P
     .exec();
   const storedHash = user?.refreshTokenHash;
   const presentedHash = digest(refreshToken);
+  if (user?.isBlocked) throw new HttpError(401, "Account unavailable");
   if (
     !user ||
     !storedHash ||
@@ -117,5 +121,11 @@ export function sessionUser(user: {
   role: string;
   isVerified: boolean;
 }) {
-  return { id: String(user._id), name: user.name, email: user.email, role: user.role, isVerified: user.isVerified };
+  return {
+    id: String(user._id),
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    isVerified: user.isVerified,
+  };
 }
