@@ -17,6 +17,8 @@ services:
         sync: false
       - key: CLIENT_URL
         sync: false
+      - key: DEMO_PAYMENTS
+        value: "false"
 
   - type: web
     name: iyalvi-admin-api

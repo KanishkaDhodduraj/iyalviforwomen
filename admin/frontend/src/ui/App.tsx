@@ -2,16 +2,20 @@ import { useState } from "react";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BrowserRouter, Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
-  Activity, Boxes, ChartNoAxesCombined, ContactRound, LayoutDashboard, LogOut, Menu,
-  Moon, PackageCheck, Settings, ShieldCheck, Sun, TicketPercent, UsersRound, Wallet, X,
+  Activity, Boxes, ChartNoAxesCombined, Clapperboard, ContactRound, LayoutDashboard, LogOut, Menu,
+  MessageSquareText, Moon, PackageCheck, ShieldCheck, Sun, TicketPercent, UsersRound, Wallet, X,
 } from "lucide-react";
 import { adminApi, authApi, signedInThisSessionKey } from "../api";
 import { authKey, LoginPage, ProtectedRoute, useAdmin } from "../auth";
 import {
   AuditPage, CustomerDetailPage, CustomersPage, DashboardPage, DiscountsPage, MessagesPage,
   OrderDetailPage, OrdersPage, PaymentsPage, ProductEditorPage, ProductsPage, ReportsPage,
+<<<<<<< Updated upstream
   SettingsPage,
+=======
+>>>>>>> Stashed changes
 } from "./pages";
+import { ReelsPage, ReviewsPage } from "./content-management";
 import { ToastProvider } from "./shared";
 
 const queryClient = new QueryClient({
@@ -22,13 +26,18 @@ const navigation = [
   { label: "Overview", to: "/dashboard", icon: LayoutDashboard, roles: ["superadmin", "manager"] },
   { label: "Orders", to: "/orders", icon: PackageCheck, roles: ["superadmin", "manager", "support"] },
   { label: "Products", to: "/products", icon: Boxes, roles: ["superadmin", "manager"] },
+  { label: "Reels", to: "/reels", icon: Clapperboard, roles: ["superadmin", "manager"] },
+  { label: "Reviews", to: "/reviews", icon: MessageSquareText, roles: ["superadmin", "manager"] },
   { label: "Customers", to: "/customers", icon: UsersRound, roles: ["superadmin", "manager", "support"] },
   { label: "Payments", to: "/payments", icon: Wallet, roles: ["superadmin", "manager"] },
   { label: "Discounts & coupons", to: "/discounts", icon: TicketPercent, roles: ["superadmin", "manager"] },
   { label: "Reports", to: "/reports", icon: ChartNoAxesCombined, roles: ["superadmin", "manager"] },
   { label: "Messages", to: "/messages", icon: ContactRound, roles: ["superadmin", "manager", "support"] },
   { label: "Audit log", to: "/audit", icon: Activity, roles: ["superadmin"] },
+<<<<<<< Updated upstream
   { label: "Settings", to: "/settings", icon: Settings, roles: ["superadmin", "manager", "support"] },
+=======
+>>>>>>> Stashed changes
 ];
 
 function AdminLayout() {
@@ -102,6 +111,8 @@ export function AdminRoutes() {
         <Route path="products" element={<RequiresRole roles={["superadmin", "manager"]}><ProductsPage /></RequiresRole>} />
         <Route path="products/new" element={<RequiresRole roles={["superadmin", "manager"]}><ProductEditorPage /></RequiresRole>} />
         <Route path="products/:id/edit" element={<RequiresRole roles={["superadmin", "manager"]}><ProductEditorPage /></RequiresRole>} />
+        <Route path="reels" element={<RequiresRole roles={["superadmin", "manager"]}><ReelsPage /></RequiresRole>} />
+        <Route path="reviews" element={<RequiresRole roles={["superadmin", "manager"]}><ReviewsPage /></RequiresRole>} />
         <Route path="customers" element={<CustomersPage />} />
         <Route path="customers/:id" element={<CustomerDetailPage />} />
         <Route path="payments" element={<RequiresRole roles={["superadmin", "manager"]}><PaymentsPage /></RequiresRole>} />
@@ -109,8 +120,13 @@ export function AdminRoutes() {
         <Route path="messages" element={<MessagesPage />} />
         <Route path="audit" element={<RequiresRole roles={["superadmin"]}><AuditPage /></RequiresRole>} />
         <Route path="reports" element={<RequiresRole roles={["superadmin", "manager"]}><ReportsPage /></RequiresRole>} />
+<<<<<<< Updated upstream
         <Route path="staff" element={<Navigate to="/dashboard" replace />} />
         <Route path="settings" element={<SettingsPage />} />
+=======
+        <Route path="staff" element={<Navigate to="/" replace />} />
+        <Route path="settings" element={<Navigate to="/" replace />} />
+>>>>>>> Stashed changes
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Route>

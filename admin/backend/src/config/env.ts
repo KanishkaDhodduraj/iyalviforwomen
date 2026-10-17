@@ -4,7 +4,9 @@ import dotenv from "dotenv";
 import { z } from "zod";
 
 const envPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../.env");
-dotenv.config({ path: envPath, quiet: true });
+if (process.env.NODE_ENV !== "test") {
+  dotenv.config({ path: envPath, quiet: true });
+}
 
 const schema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(5001),

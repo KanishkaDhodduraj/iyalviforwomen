@@ -11,11 +11,11 @@ export const productListQuery = z
     category: z.enum(["saree", "kurti"]).optional(),
     subCategory: z.string().trim().max(80).optional(),
     fabric: z.string().trim().max(80).optional(),
-    occasion: z.string().trim().max(60).optional(),
     color: z.string().trim().max(60).optional(),
     minPrice: z.coerce.number().min(0).optional(),
     maxPrice: z.coerce.number().min(0).optional(),
     search: z.string().trim().max(100).optional(),
+    isNewArrival: z.enum(["true", "false"]).transform((value) => value === "true").optional(),
     sort: z.enum(["price_asc", "price_desc", "newest"]).default("newest"),
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(50).default(20),
@@ -33,12 +33,14 @@ export const listProducts: RequestHandler = async (request, response) => {
   if (query.category) filter.category = query.category;
   if (query.subCategory) filter.subCategory = new RegExp(escapeRegex(query.subCategory), "i");
   if (query.fabric) filter.fabric = new RegExp(escapeRegex(query.fabric), "i");
-  if (query.occasion) filter.occasion = new RegExp(escapeRegex(query.occasion), "i");
   if (query.color) filter.colors = new RegExp(`^${escapeRegex(query.color)}$`, "i");
+  if (query.isNewArrival !== undefined) filter.isNewArrival = query.isNewArrival;
   if (query.minPrice !== undefined || query.maxPrice !== undefined) {
-    filter.price = {
-      ...(query.minPrice !== undefined && { $gte: query.minPrice }),
-      ...(query.maxPrice !== undefined && { $lte: query.maxPrice }),
+    filter.$expr = {
+      $and: [
+        ...(query.minPrice !== undefined ? [{ $gte: [{ $ifNull: ["$mrp", "$price"] }, query.minPrice] }] : []),
+        ...(query.maxPrice !== undefined ? [{ $lte: [{ $ifNull: ["$mrp", "$price"] }, query.maxPrice] }] : []),
+      ],
     };
   }
   if (query.search) filter.$text = { $search: query.search };
@@ -75,13 +77,13 @@ export const getProduct: RequestHandler = async (request, response) => {
 
 type ProductRecord = Record<string, unknown> & {
   _id: unknown;
-  category?: string;
+  category?: string | null;
   price?: number;
   mrp?: number;
 };
 
-function hasPrice(product: ProductRecord): product is ProductRecord & { category: string; price: number } {
-  return typeof product.price === "number" && typeof product.category === "string";
+function hasPrice(product: ProductRecord): product is ProductRecord & { price: number } {
+  return typeof product.price === "number";
 }
 
 function customerProduct(product: ProductRecord, activeDiscounts: DiscountCandidate[]) {
@@ -93,14 +95,16 @@ function customerProduct(product: ProductRecord, activeDiscounts: DiscountCandid
     category: product.category,
     subCategory: product.subCategory,
     fabric: product.fabric,
-    occasion: product.occasion,
-    colors: product.colors,
-    sizes: customerSizes(product.sizes),
-    price: product.price,
+    colors: Array.isArray(product.colors) && product.colors.length ? product.colors : ["Default"],
+    sizes: customerSizes(product.sizes, Number(product.stock ?? 0)),
+    sizeStock: customerSizeStock(product.sizes, Number(product.stock ?? 0)),
+    inStock: Number(product.stock ?? 0) > 0,
+    lowStock: Number(product.stock ?? 0) > 0 && Number(product.stock ?? 0) <= 5 ? Number(product.stock) : null,
+    price: typeof product.mrp === "number" ? product.mrp : product.price,
     mrp: product.mrp,
     images: customerImages(product.images),
-    stock: product.stock,
     isFeatured: product.isFeatured,
+    isNewArrival: product.isNewArrival,
     tags: product.tags,
   };
   if (!hasPrice(product)) return result;
@@ -110,13 +114,14 @@ function customerProduct(product: ProductRecord, activeDiscounts: DiscountCandid
     {
       id: String(product._id).toLowerCase(),
       ...(typeof product.slug === "string" && { slug: product.slug }),
-      category: product.category,
+      category: product.category ?? "",
       ...(typeof product.subCategory === "string" && { collection: product.subCategory }),
     },
   );
-  const priced = priceWithDiscounts(product.price, selected);
+  const basePrice = typeof product.mrp === "number" ? product.mrp : product.price;
+  const priced = priceWithDiscounts(basePrice, selected);
   result.price = priced.price;
-  result.originalPrice = Math.max(product.price, typeof product.mrp === "number" ? product.mrp : product.price);
+  result.originalPrice = basePrice;
   const flashSaleEndsAt = selected
     .filter((discount) => discount.isFlashSale)
     .map((discount) => new Date(discount.endsAt).toISOString())
@@ -140,13 +145,34 @@ function customerImages(images: unknown): unknown[] {
   }).filter((image) => image !== null);
 }
 
-function customerSizes(sizes: unknown): string[] {
-  if (!Array.isArray(sizes)) return [];
+function customerSizes(sizes: unknown, stock: number): string[] {
+  if (!Array.isArray(sizes) || sizes.length === 0) return stock > 0 ? ["One Size"] : [];
   return sizes.flatMap((size) => {
     if (typeof size === "string") return [size];
     if (typeof size !== "object" || size === null || !("size" in size)) return [];
     return typeof size.size === "string" ? [size.size] : [];
   });
+}
+
+function customerSizeStock(sizes: unknown, totalStock: number): Record<string, { inStock: boolean; lowStock: number | null }> {
+  const variants = Array.isArray(sizes) ? sizes : [];
+  if (variants.length === 0) {
+    return {
+      "One Size": {
+        inStock: totalStock > 0,
+        lowStock: totalStock > 0 && totalStock <= 5 ? totalStock : null,
+      },
+    };
+  }
+  return Object.fromEntries(variants.flatMap((variant) => {
+    if (typeof variant === "string") {
+      return [[variant, { inStock: totalStock > 0, lowStock: totalStock > 0 && totalStock <= 5 ? totalStock : null }]];
+    }
+    if (typeof variant !== "object" || variant === null || !("size" in variant) || !("stock" in variant)) return [];
+    const { size, stock } = variant as { size: unknown; stock: unknown };
+    if (typeof size !== "string" || typeof stock !== "number") return [];
+    return [[size, { inStock: stock > 0, lowStock: stock > 0 && stock <= 5 ? stock : null }]];
+  }));
 }
 
 function escapeRegex(value: string): string {

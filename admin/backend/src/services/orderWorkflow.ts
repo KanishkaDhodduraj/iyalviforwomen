@@ -1,9 +1,10 @@
-export type ManagedOrderStatus = "placed" | "packed" | "shipped" | "delivered" | "cancelled";
+export type ManagedOrderStatus = "placed" | "packed" | "shipped" | "out_for_delivery" | "delivered" | "cancelled";
 
 const nextStatus: Partial<Record<ManagedOrderStatus, ManagedOrderStatus>> = {
   placed: "packed",
   packed: "shipped",
-  shipped: "delivered",
+  shipped: "out_for_delivery",
+  out_for_delivery: "delivered",
 };
 
 export function canTransitionOrderStatus(from: ManagedOrderStatus, to: ManagedOrderStatus): boolean {

@@ -58,7 +58,7 @@ export async function calculateCartPrice(
   const byId = new Map(products.map((product) => [String(product._id).toLowerCase(), product]));
   for (const item of items) {
     const product = byId.get(item.productId.toLowerCase());
-    if (!product || sizeStock(product, item.size) === undefined || !product.colors.includes(item.color)) {
+    if (!product || sizeStock(product, item.size) === undefined || !(product.colors.length ? product.colors : ["Default"]).includes(item.color)) {
       throw new HttpError(400, "A cart item is unavailable");
     }
   }
@@ -83,12 +83,13 @@ export async function calculateCartPrice(
       {
         id: item.productId.toLowerCase(),
         slug: product.slug,
-        category: product.category,
+        category: product.category ?? "",
         collection: product.subCategory,
       },
       now,
     );
-    const price = priceWithDiscounts(product.price, applicable);
+    const basePrice = typeof product.mrp === "number" ? product.mrp : product.price;
+    const price = priceWithDiscounts(basePrice, applicable);
     productDiscountTotal += price.discountAmount * item.qty;
     return {
       product: product._id,
@@ -97,7 +98,7 @@ export async function calculateCartPrice(
       color: item.color,
       qty: item.qty,
       unitPrice: price.price,
-      originalUnitPrice: product.price,
+      originalUnitPrice: basePrice,
       discountAmount: price.discountAmount * item.qty,
       discounts: price.discounts,
     };
@@ -160,6 +161,7 @@ export async function calculateCartPrice(
 }
 
 function sizeStock(product: { sizes: unknown[]; stock: number }, size: string): number | undefined {
+  if (product.sizes.length === 0 && size === "One Size") return product.stock;
   const match = product.sizes.find((entry) =>
     typeof entry === "string" ? entry === size : isSizeStock(entry) && entry.size === size,
   );

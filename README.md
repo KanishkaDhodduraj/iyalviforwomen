@@ -35,6 +35,7 @@ npm run dev:admin:backend
 npm run dev:admin:frontend
 ```
 
+<<<<<<< Updated upstream
 The admin API listens on `http://localhost:5001`. Configure `admin/backend/.env` from
 `admin/backend/.env.example` with the same `DATABASE_URL` used by the shop and a separate,
 random `ADMIN_JWT_SECRET` of at least 32 characters. Set `ADMIN_CLIENT_URL` to
@@ -49,6 +50,12 @@ superadmin; passwords must be at least 8 characters. This command refuses to run
 Administrator cookies are browser-session cookies. The server maintains an eight-hour rolling
 refresh-token inactivity window. Administrators can update their profile and password, manage
 store settings, and review customer contact messages from the admin workspace.
+=======
+The admin API listens on `http://localhost:5001`. Configure its local environment with
+`DATABASE_URL`, `ADMIN_JWT_SECRET`, and `ADMIN_CLIENT_URL`. Bootstrap the first superadmin by
+supplying `ADMIN_EMAIL` and `ADMIN_PASSWORD` to `npm --prefix admin/backend run create-admin`.
+There is no public admin registration; sign in with a provisioned administrator account.
+>>>>>>> Stashed changes
 
 The admin frontend has its own `admin/frontend/.env.example`. Credentials and sessions are
 handled by the admin API using httpOnly cookies; no authentication tokens are stored in browser
@@ -97,22 +104,22 @@ The root `render.yaml` defines both backend services. Deploy it as a Render Blue
 service uses `npm install && npm run build`, `npm start`, and `/api/health` for health checks.
 Set these service environment variables in Render:
 
-| Service | Required variables |
+| Service | Variables |
 | --- | --- |
-| Customer API | `DATABASE_URL`, `JWT_SECRET` (at least 32 characters), `CLIENT_URL` (the exact customer Vercel origin) |
-| Admin API | `DATABASE_URL`, `ADMIN_JWT_SECRET` (at least 32 characters), `ADMIN_CLIENT_URL` (the exact admin Vercel origin) |
+| Customer API | `DATABASE_URL`, `JWT_SECRET`, `CLIENT_URL` (exact customer Vercel origin), optional `DEMO_PAYMENTS` (`false` by default; set to `true` only for demo checkout) |
+| Admin API | `DATABASE_URL`, `ADMIN_JWT_SECRET`, `ADMIN_CLIENT_URL` (exact admin Vercel origin) |
 
 The Blueprint sets `NODE_ENV=production` and `TRUST_PROXY=1`. Cookie SameSite defaults to
 `lax` for same-origin Vercel proxy rewrites; set `COOKIE_SAME_SITE=none` only when calling a
-backend cross-site directly from a frontend, and keep production HTTPS enabled.
+backend cross-site directly from a frontend, and keep production HTTPS enabled. Set
+`COOKIE_SAME_SITE` to `lax` for the Vercel same-origin proxy setup.
 
 ## Backend setup
 
-Create `customer/backend/.env` locally (it is ignored by Git) with a MongoDB connection URI,
-a random `JWT_SECRET` of at least 32 characters, and `CLIENT_URL`. The server accepts either
-`DATABASE_URL` or the Atlas-style `MONGODB_URI` variable. Google sign-in and online payments
-are disabled; no Google or payment secrets are required. Never put credentials in frontend
-environment variables or commit them.
+The customer backend needs `DATABASE_URL` (or `MONGODB_URI`), `JWT_SECRET` (at least 32
+characters), and `CLIENT_URL`. `DEMO_PAYMENTS` is optional and defaults to disabled. When
+enabled, checkout records a demo order without contacting a payment gateway or collecting
+card numbers. Never put credentials in frontend environment variables or commit them.
 
 ```sh
 npm --prefix customer/backend run db:indexes
@@ -120,8 +127,9 @@ npm --prefix customer/backend run seed
 ```
 
 Create indexes before seeding; production disables automatic index creation, so run the
-index command during database setup and after model index changes. The seed command upserts the
-existing frontend catalog without resetting stock on later runs. Browser clients must first fetch
+index command during database setup and after model index changes. The seed command creates
+only the default store settings document; products and media are managed from the admin app.
+Browser clients must first fetch
 `GET /api/auth/csrf` with credentials enabled, then send the returned `x-csrf-token` header and
 cookies with state-changing requests. Sessions use httpOnly cookies; the API does not return
 access or refresh tokens in JSON.

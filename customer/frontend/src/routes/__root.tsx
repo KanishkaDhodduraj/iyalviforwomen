@@ -6,10 +6,17 @@ import {
   useRouter,
   HeadContent,
   Scripts,
+  useNavigate,
+  useRouterState,
   type ErrorComponentProps,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
-import { FloatingOffer } from "@/components/iyalvi/floating-offer";
+import { FloatingDiscovery } from "@/components/iyalvi/floating-discovery";
+import { CustomerNavLink } from "@/components/iyalvi/customer-nav-link";
+import { customerNavigation } from "@/lib/customer-navigation";
+import { Button } from "@/components/ui/button";
+import { ArrowLeft } from "lucide-react";
+import { navigateBackOrHome } from "../lib/navigation";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -37,7 +44,6 @@ function NotFoundComponent() {
 }
 
 function ErrorComponent({ error, reset }: ErrorComponentProps) {
-  console.error(error);
   const router = useRouter();
   useEffect(() => {
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
@@ -79,11 +85,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "IYALVI — Everyday style, effortlessly yours" },
-      { name: "description", content: "Easy-to-wear styles for everyday plans and big moments." },
+      { title: "IYALVI" },
+      { name: "description", content: "Discover contemporary Indian wear from IYALVI." },
       { name: "author", content: "IYALVI" },
-      { property: "og:title", content: "IYALVI — Everyday style, effortlessly yours" },
-      { property: "og:description", content: "From brunch to big days, find your kind of style." },
+      { property: "og:title", content: "IYALVI" },
+      { property: "og:description", content: "Discover contemporary Indian wear from IYALVI." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -95,7 +101,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:wght@400;500;600;700&family=Noto+Serif+Tamil:wght@400;500&family=Noto+Serif+Devanagari:wght@400;500&display=swap" },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:wght@400;500;600;700&display=swap",
+      },
     ],
   }),
   shellComponent: RootShell,
@@ -120,12 +129,41 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const navigate = useNavigate();
 
   return (
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
-      <FloatingOffer />
+      <FloatingDiscovery />
+      {pathname !== "/" && (
+        <Button
+          className="customer-back-button"
+          variant="outline"
+          onClick={() => {
+            if (typeof window === "undefined") return;
+            navigateBackOrHome(
+              pathname,
+              window.history.length,
+              () => window.history.back(),
+              () => {
+                void navigate({ to: "/", replace: true });
+              },
+            );
+          }}
+        >
+          <ArrowLeft size={18} />
+          Back
+        </Button>
+      )}
+      <nav className="mobile-bottom-nav" aria-label="Mobile main navigation">
+        {customerNavigation.map((item) => (
+          <CustomerNavLink key={item.to} to={item.to}>
+            {item.label}
+          </CustomerNavLink>
+        ))}
+      </nav>
     </QueryClientProvider>
   );
 }

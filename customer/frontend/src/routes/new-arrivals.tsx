@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { NewArrivalsPage } from "@/components/iyalvi/signature-pages";
+import { NewArrivalsPage } from "@/components/iyalvi/new-arrivals-page";
 
 export const Route = createFileRoute("/new-arrivals")({
   head: () => ({
@@ -7,7 +7,7 @@ export const Route = createFileRoute("/new-arrivals")({
       { title: "New Arrivals — IYALVI" },
       {
         name: "description",
-        content: "Discover the latest sarees and kurtis with limited-time introductory prices.",
+        content: "Discover the latest sarees and kurtis from IYALVI.",
       },
     ],
   }),

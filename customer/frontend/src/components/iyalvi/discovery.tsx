@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowUpRight,
   Heart,
@@ -14,7 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { products, occasions, filterProducts, formatPrice, type Product } from "@/data/products";
+import { formatPrice, type Product } from "@/data/products";
 import { usePrototype } from "@/data/store";
 import {
   Sheet,
@@ -23,69 +24,70 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Kolam } from "./motifs";
 import { api, getAllProducts, productFromApi, type ApiProduct } from "@/lib/api";
 import { LoginDialog } from "@/components/iyalvi/account-control";
-
-function flashSaleRemaining(endsAt: string): string | null {
-  const remainingMs = new Date(endsAt).getTime() - Date.now();
-  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return null;
-  const totalSeconds = Math.floor(remainingMs / 1000);
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  const clock = [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
-  return days > 0 ? `${days}d ${clock}` : clock;
-}
-
-function FlashSaleCountdown({ endsAt }: { endsAt: string }) {
-  const [remaining, setRemaining] = useState(() => flashSaleRemaining(endsAt));
-
-  useEffect(() => {
-    const update = () => setRemaining(flashSaleRemaining(endsAt));
-    const timer = window.setInterval(update, 1000);
-    return () => window.clearInterval(timer);
-  }, [endsAt]);
-
-  if (!remaining) return null;
-  return (
-    <small
-      className="flash-countdown product-flash-countdown"
-      aria-label={`Flash sale ends in ${remaining}`}
-    >
-      <Clock aria-hidden="true" />
-      <span>{remaining}</span>
-    </small>
-  );
-}
 
 export function ProductCard({
   product,
   onSelect,
+  onAdded,
+  notify,
 }: {
   product: Product;
   onSelect: (p: Product) => void;
+  onAdded?: () => void;
+  notify?: (message: string) => void;
 }) {
   const { wishlist, toggleWish } = usePrototype();
+  const { addToBag } = usePrototype();
+  const navigate = useNavigate();
   const customer = usePrototype((state) => state.customer);
   const wishlistError = usePrototype((state) => state.wishlistError);
   const reduced = useReducedMotion();
   const [imageLoaded, setImageLoaded] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
+  const [size, setSize] = useState("");
+  const [color, setColor] = useState("");
+  const [checkoutAfterLogin, setCheckoutAfterLogin] = useState(false);
+  const [wishlistAfterLogin, setWishlistAfterLogin] = useState(false);
+  const [needsOptions, setNeedsOptions] = useState(false);
   const saved = wishlist.includes(product.id);
-  const alternateColor =
-    product.category === "Kurtis"
-      ? products.find(
-          (candidate) =>
-            candidate.category === "Kurtis" &&
-            candidate.id !== product.id &&
-            candidate.name.split(" ")[0] === product.name.split(" ")[0],
-        )
-      : undefined;
+  const availability = size ? product.sizeStock?.[size] : undefined;
+  const selectedInStock = availability?.inStock ?? product.inStock ?? true;
+  const requiredChoices = [
+    ...(product.sizes.length > 0 && !size ? ["size"] : []),
+    ...(product.colors.length > 0 && !color ? ["colour"] : []),
+  ];
+  const add = (checkoutNow: boolean) => {
+    if ((product.sizes.length > 0 && !size) || (product.colors.length > 0 && !color)) {
+      setNeedsOptions(true);
+      return;
+    }
+    if (!selectedInStock || product.inStock === false) return;
+    setNeedsOptions(needsOptions && product.colors.length > 0 && !color);
+    addToBag(
+      product.id,
+      size || product.sizes[0] || "One Size",
+      color || product.colors[0] || "Default",
+    );
+    if (checkoutNow) {
+      if (!customer) {
+        setCheckoutAfterLogin(true);
+        setLoginOpen(true);
+      } else {
+        void navigate({ to: "/checkout" });
+      }
+    } else {
+      notify?.(`${product.name} was added to your bag.`);
+      onAdded?.();
+    }
+  };
   return (
     <>
-      <article className={`product-card product-card-${product.category.toLowerCase()}`}>
+      <article
+        id={`product-${product.slug}`}
+        className={`product-card product-card-${product.category.toLowerCase()}`}
+      >
         <div className="product-image-wrap">
           <Button
             variant="ghost"
@@ -105,18 +107,6 @@ export function ProductCard({
               onLoad={() => setImageLoaded(true)}
               onError={() => setImageLoaded(true)}
             />
-            {alternateColor && (
-              <img
-                className="product-alternate-image"
-                src={alternateColor.image}
-                width={768}
-                height={1024}
-                alt={`${product.name} in ${alternateColor.colors[0]}`}
-                loading="lazy"
-                onLoad={() => setImageLoaded(true)}
-                onError={() => setImageLoaded(true)}
-              />
-            )}
             <span className="product-interaction-label">
               {product.category === "Sarees" ? "Drape view · pallu & border" : "See another shade"}
             </span>
@@ -127,7 +117,14 @@ export function ProductCard({
             className={`wish-button ${saved ? "is-saved" : ""}`}
             aria-label={`${saved ? "Remove" : "Save"} ${product.name}`}
             aria-pressed={saved}
-            onClick={() => (customer ? toggleWish(product.id) : setLoginOpen(true))}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (customer) toggleWish(product.id);
+              else {
+                setWishlistAfterLogin(true);
+                setLoginOpen(true);
+              }
+            }}
           >
             <motion.span
               animate={
@@ -151,7 +148,6 @@ export function ProductCard({
               product.craft
             )}
           </span>
-          {product.offerEndsAt && <FlashSaleCountdown endsAt={product.offerEndsAt} />}
         </div>
         <div className="product-meta">
           <span>{product.fabric}</span>
@@ -168,9 +164,93 @@ export function ProductCard({
               aria-label={product.colors[0]}
             />
           </p>
+          <div className="product-purchase-options">
+            <label>
+              <span className="sr-only">Size for {product.name}</span>
+              <select
+                aria-label={`Size for ${product.name}`}
+                value={size}
+                aria-invalid={needsOptions && product.sizes.length > 0 && !size}
+                className={
+                  needsOptions && product.sizes.length > 0 && !size ? "option-required" : ""
+                }
+                onChange={(event) => {
+                  setSize(event.target.value);
+                  setNeedsOptions(needsOptions && product.sizes.length > 0 && !size);
+                }}
+              >
+                <option value="">Size</option>
+                {product.sizes.map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span className="sr-only">Colour for {product.name}</span>
+              <select
+                aria-label={`Colour for ${product.name}`}
+                value={color}
+                aria-invalid={needsOptions && product.colors.length > 0 && !color}
+                className={
+                  needsOptions && product.colors.length > 0 && !color ? "option-required" : ""
+                }
+                onChange={(event) => {
+                  setColor(event.target.value);
+                  setNeedsOptions(false);
+                }}
+              >
+                <option value="">Colour</option>
+                {product.colors.map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {size && availability?.lowStock !== null && availability?.lowStock !== undefined && (
+            <p className="stock-urgency">Only {availability.lowStock} left</p>
+          )}
+          {size && !selectedInStock && <p className="stock-unavailable">Out of stock</p>}
+          {!product.inStock && !size && <p className="stock-unavailable">Out of stock</p>}
+          {needsOptions && (
+            <p className="form-error product-option-error" role="alert">
+              Choose {requiredChoices.join(" and ")} first.
+            </p>
+          )}
+          <div className="product-card-actions">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={(event) => {
+                event.stopPropagation();
+                add(false);
+              }}
+              disabled={!selectedInStock || product.inStock === false}
+            >
+              Add to bag
+            </Button>
+            <Button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                add(true);
+              }}
+              disabled={!selectedInStock || product.inStock === false}
+            >
+              Checkout now
+            </Button>
+          </div>
         </div>
       </article>
-      <LoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
+      <LoginDialog
+        open={loginOpen}
+        onOpenChange={setLoginOpen}
+        onSuccess={() => {
+          if (checkoutAfterLogin) void navigate({ to: "/checkout" });
+          if (wishlistAfterLogin) toggleWish(product.id);
+          setCheckoutAfterLogin(false);
+          setWishlistAfterLogin(false);
+        }}
+      />
     </>
   );
 }
@@ -191,11 +271,11 @@ export function SearchDialog({
   const [query, setQuery] = useState(initialQuery);
   const [category, setCategory] = useState(initialCategory);
   const { recent, rememberSearch } = usePrototype();
-  const customer = usePrototype((state) => state.customer);
   const [results, setResults] = useState<Product[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState("");
   useEffect(() => {
+    if (!open || typeof window === "undefined") return;
     let active = true;
     const timer = window.setTimeout(() => {
       setSearchLoading(true);
@@ -208,9 +288,9 @@ export function SearchDialog({
         .get<{ products: ApiProduct[] }>(`/products?${params.toString()}`)
         .then(({ products: list }) => {
           if (active) {
-            const mapped = list.length ? list.map(productFromApi) : filterProducts(query.trim());
+            const mapped = list.map(productFromApi);
             setResults(
-              mapped.filter((product) => category === "All" || product.occasion === category),
+              mapped.filter((product) => category === "All" || product.category === category),
             );
           }
         })
@@ -226,7 +306,7 @@ export function SearchDialog({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [query, category, customer]);
+  }, [open, query, category]);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="search-dialog">
@@ -249,7 +329,7 @@ export function SearchDialog({
           />
         </form>
         <div className="search-chips">
-          {["All", ...occasions].map((o) => (
+          {["All", "Sarees", "Kurtis"].map((o) => (
             <Button
               variant={category === o ? "default" : "outline"}
               key={o}
@@ -296,9 +376,7 @@ export function SearchDialog({
               <img src={p.image} alt={p.name} width={64} height={80} />
               <span>
                 <strong>{p.name}</strong>
-                <small>
-                  {p.fabric} · {p.occasion}
-                </small>
+                <small>{p.fabric}</small>
                 <b>{formatPrice(p.price)}</b>
               </span>
               <ArrowUpRight />
@@ -306,9 +384,8 @@ export function SearchDialog({
           ))}
           {!searchLoading && !searchError && results.length === 0 && (
             <div className="empty-state">
-              <Kolam />
               <h3>Your next favourite is out there.</h3>
-              <p>Try another style, colour or occasion.</p>
+              <p>Try another style, colour or search.</p>
               <Button
                 variant="outline"
                 onClick={() => {
@@ -330,56 +407,85 @@ export function ProductDialog({
   product,
   onClose,
   notify,
+  onAdded,
 }: {
   product: Product | null;
   onClose: () => void;
   notify: (v: string) => void;
+  onAdded?: () => void;
 }) {
+  const navigate = useNavigate();
   const { addToBag, toggleWish, wishlist, rememberProduct } = usePrototype();
   const customer = usePrototype((state) => state.customer);
   const [loginOpen, setLoginOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [size, setSize] = useState("");
   const [color, setColor] = useState("");
+  const [checkoutAfterLogin, setCheckoutAfterLogin] = useState(false);
+  const [wishlistAfterLogin, setWishlistAfterLogin] = useState(false);
+  const [needsOptions, setNeedsOptions] = useState(false);
   const [catalog, setCatalog] = useState<Product[]>([]);
   const [relatedError, setRelatedError] = useState("");
   const reduced = useReducedMotion();
   useEffect(() => {
     if (product) {
       rememberProduct(product.id);
-      setSize(product.sizes[0] ?? "");
-      setColor(product.colors[0] ?? "");
+      setSize("");
+      setColor("");
       setRelatedError("");
       setCatalog([]);
       void api
         .get<{ products: ApiProduct[] }>("/products?limit=50")
-        .then(({ products: found }) =>
-          setCatalog(found.length ? found.map(productFromApi) : products),
-        )
+        .then(({ products: found }) => setCatalog(found.map(productFromApi)))
         .catch((error: unknown) => {
-          setCatalog(products);
           setRelatedError(
             error instanceof Error ? error.message : "Related styles could not be loaded.",
           );
         });
     }
-  }, [product, rememberProduct, customer]);
-  const add = () => {
+  }, [product, rememberProduct]);
+  const purchase = (checkoutNow: boolean) => {
     if (!product || adding) return;
-    addToBag(product.id, size, color);
-    setAdding(true);
-    notify(`${product.name} is in your bag.`);
-    setTimeout(() => setAdding(false), 900);
+    if ((product.sizes.length > 0 && !size) || (product.colors.length > 0 && !color)) {
+      setNeedsOptions(true);
+      return;
+    }
+    if (!selectedInStock || product.inStock === false) return;
+    setNeedsOptions(false);
+    addToBag(
+      product.id,
+      size || product.sizes[0] || "One Size",
+      color || product.colors[0] || "Default",
+    );
+    if (checkoutNow) {
+      if (!customer) {
+        setCheckoutAfterLogin(true);
+        setLoginOpen(true);
+      } else {
+        setAdding(true);
+        notify(`${product.name} is ready for checkout.`);
+        void navigate({ to: "/checkout" });
+      }
+    } else {
+      notify(`${product.name} was added to your bag.`);
+      onAdded?.();
+      onClose();
+    }
   };
   const look = product
     ? catalog
         .filter(
-          (candidate) =>
-            candidate.id !== product.id &&
-            candidate.category !== product.category &&
-            candidate.occasion === product.occasion,
+          (candidate) => candidate.id !== product.id && candidate.category !== product.category,
         )
         .slice(0, 2)
+    : [];
+  const availability = product && size ? product.sizeStock?.[size] : undefined;
+  const selectedInStock = availability?.inStock ?? product?.inStock ?? true;
+  const requiredChoices = product
+    ? [
+        ...(product.sizes.length > 0 && !size ? ["size"] : []),
+        ...(product.colors.length > 0 && !color ? ["colour"] : []),
+      ]
     : [];
   return (
     <>
@@ -434,11 +540,28 @@ export function ProductDialog({
                     {Math.round((1 - product.price / product.originalPrice) * 100)}% OFF
                   </b>
                 )}
-                {product.offerEndsAt && <FlashSaleCountdown endsAt={product.offerEndsAt} />}
+                {size &&
+                  availability?.lowStock !== null &&
+                  availability?.lowStock !== undefined && (
+                    <p className="stock-urgency">Only {availability.lowStock} left</p>
+                  )}
+                {size && !selectedInStock && <p className="stock-unavailable">Out of stock</p>}
+                {!product.inStock && !size && <p className="stock-unavailable">Out of stock</p>}
                 <div className="detail-options">
                   <label>
                     Colour
-                    <select value={color} onChange={(event) => setColor(event.target.value)}>
+                    <select
+                      value={color}
+                      aria-invalid={needsOptions && product.colors.length > 0 && !color}
+                      className={
+                        needsOptions && product.colors.length > 0 && !color ? "option-required" : ""
+                      }
+                      onChange={(event) => {
+                        setColor(event.target.value);
+                        setNeedsOptions(needsOptions && product.sizes.length > 0 && !size);
+                      }}
+                    >
+                      <option value="">Choose a colour</option>
                       {product.colors.map((value) => (
                         <option key={value}>{value}</option>
                       ))}
@@ -446,7 +569,18 @@ export function ProductDialog({
                   </label>
                   <label>
                     Size
-                    <select value={size} onChange={(event) => setSize(event.target.value)}>
+                    <select
+                      value={size}
+                      aria-invalid={needsOptions && product.sizes.length > 0 && !size}
+                      className={
+                        needsOptions && product.sizes.length > 0 && !size ? "option-required" : ""
+                      }
+                      onChange={(event) => {
+                        setSize(event.target.value);
+                        setNeedsOptions(needsOptions && product.colors.length > 0 && !color);
+                      }}
+                    >
+                      <option value="">Choose a size</option>
                       {product.sizes.map((value) => (
                         <option key={value}>{value}</option>
                       ))}
@@ -480,15 +614,42 @@ export function ProductDialog({
                     <dd>Check the care label for best results.</dd>
                   </div>
                 </dl>
-                <Button className="detail-add" size="lg" onClick={add} disabled={adding}>
-                  <ShoppingBag />
-                  {adding ? "Added to your bag" : "Add to bag"}
-                  <ArrowUpRight />
-                </Button>
+                {needsOptions && (
+                  <p className="form-error product-option-error" role="alert">
+                    Choose {requiredChoices.join(" and ")} first.
+                  </p>
+                )}
+                <div className="detail-purchase-actions">
+                  <Button
+                    className="detail-add"
+                    variant="outline"
+                    onClick={() => purchase(false)}
+                    disabled={adding || !selectedInStock || product.inStock === false}
+                  >
+                    <ShoppingBag />
+                    Add to bag
+                  </Button>
+                  <Button
+                    className="detail-add"
+                    size="lg"
+                    onClick={() => purchase(true)}
+                    disabled={adding || !selectedInStock || product.inStock === false}
+                  >
+                    <ShoppingBag />
+                    Checkout now
+                    <ArrowUpRight />
+                  </Button>
+                </div>
                 <Button
                   variant="link"
                   className="detail-wish"
-                  onClick={() => (customer ? toggleWish(product.id) : setLoginOpen(true))}
+                  onClick={() => {
+                    if (customer) toggleWish(product.id);
+                    else {
+                      setWishlistAfterLogin(true);
+                      setLoginOpen(true);
+                    }
+                  }}
                 >
                   <Heart fill={wishlist.includes(product.id) ? "currentColor" : "none"} />
                   {wishlist.includes(product.id)
@@ -508,7 +669,16 @@ export function ProductDialog({
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => addToBag(item.id, item.sizes[0], item.colors[0])}
+                          onClick={() => {
+                            addToBag(
+                              item.id,
+                              item.sizes[0] ?? "One Size",
+                              item.colors[0] ?? "Default",
+                            );
+                            notify(`${item.name} was added to your bag.`);
+                            onAdded?.();
+                            onClose();
+                          }}
                         >
                           Add
                         </Button>
@@ -529,7 +699,16 @@ export function ProductDialog({
           )}
         </DialogContent>
       </Dialog>
-      <LoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
+      <LoginDialog
+        open={loginOpen}
+        onOpenChange={setLoginOpen}
+        onSuccess={() => {
+          if (checkoutAfterLogin) void navigate({ to: "/checkout" });
+          if (wishlistAfterLogin && product) toggleWish(product.id);
+          setCheckoutAfterLogin(false);
+          setWishlistAfterLogin(false);
+        }}
+      />
     </>
   );
 }
@@ -549,6 +728,7 @@ export function TrunkDialog({
   const customer = usePrototype((state) => state.customer);
   const [catalog, setCatalog] = useState<Product[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
   const [quote, setQuote] = useState<{
     items: Array<{ product: string; unitPrice: number }>;
     subtotal: number;
@@ -558,18 +738,15 @@ export function TrunkDialog({
   } | null>(null);
   const [quoteError, setQuoteError] = useState("");
   const [loadingQuote, setLoadingQuote] = useState(false);
-  const [couponDraft, setCouponDraft] = useState("");
-  const [couponCode, setCouponCode] = useState("");
   const [loginOpen, setLoginOpen] = useState(false);
   useEffect(() => {
     if (mode === "wishlist" && !customer) setLoginOpen(true);
   }, [mode, customer]);
   const chosen = catalog.filter((product) => wishlist.includes(product.id));
-  const availableCartCatalog = catalog.length > 0 ? catalog : products;
   const bagProducts = useMemo(
     () =>
       bag.flatMap((item) => {
-        const product = availableCartCatalog.find((candidate) => candidate.id === item.id);
+        const product = catalog.find((candidate) => candidate.id === item.id);
         return product
           ? [
               {
@@ -581,7 +758,7 @@ export function TrunkDialog({
             ]
           : [];
       }),
-    [bag, availableCartCatalog],
+    [bag, catalog],
   );
   const pricingItems = useMemo(
     () =>
@@ -594,6 +771,7 @@ export function TrunkDialog({
     [bagProducts],
   );
   useEffect(() => {
+    if (mode === null || catalogLoaded) return;
     let active = true;
     setCatalogLoading(true);
     setQuoteError("");
@@ -609,12 +787,15 @@ export function TrunkDialog({
           );
       })
       .finally(() => {
-        if (active) setCatalogLoading(false);
+        if (active) {
+          setCatalogLoading(false);
+          setCatalogLoaded(true);
+        }
       });
     return () => {
       active = false;
     };
-  }, [customer]);
+  }, [mode, catalogLoaded]);
   useEffect(() => {
     if (mode !== "bag" || bag.length === 0 || pricingItems.length !== bag.length) {
       setQuote(null);
@@ -633,7 +814,6 @@ export function TrunkDialog({
         total: number;
       }>("/cart/price", {
         items: pricingItems,
-        ...(customer && couponCode && { couponCode }),
       })
       .then((result) => {
         if (active) setQuote(result);
@@ -648,26 +828,8 @@ export function TrunkDialog({
     return () => {
       active = false;
     };
-  }, [mode, bag, customer, pricingItems, couponCode]);
+  }, [mode, bag, pricingItems]);
   const total = quote?.total ?? 0;
-  const applyCoupon = async () => {
-    if (!couponDraft.trim() || pricingItems.length === 0) {
-      setQuoteError("Enter a coupon code.");
-      return;
-    }
-    if (!customer) {
-      setQuoteError("Sign in to apply a coupon.");
-      return;
-    }
-    try {
-      await api.post("/coupons/validate", { code: couponDraft.trim(), items: pricingItems });
-      setCouponCode(couponDraft.trim());
-      setQuoteError("");
-    } catch (error) {
-      setQuoteError(error instanceof Error ? error.message : "This coupon could not be validated.");
-      setCouponCode("");
-    }
-  };
   return (
     <>
       <Sheet
@@ -761,7 +923,6 @@ export function TrunkDialog({
             )}
             {bag.length === 0 && (
               <div className="empty-state cart-empty-state">
-                <Kolam />
                 <h3>Your bag is waiting.</h3>
                 <p>Your next favourite is just around the corner.</p>
               </div>
@@ -774,42 +935,6 @@ export function TrunkDialog({
               </p>
             )}
             {loadingQuote && <p role="status">Checking price and availability…</p>}
-            <div className="cart-coupon-entry">
-              <Input
-                aria-label="Coupon code"
-                value={couponDraft}
-                onChange={(event) =>
-                  setCouponDraft(
-                    event.target.value
-                      .toUpperCase()
-                      .replace(/[^A-Z0-9_-]/g, "")
-                      .slice(0, 40),
-                  )
-                }
-                placeholder="Coupon code"
-                maxLength={40}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void applyCoupon()}
-                disabled={loadingQuote || bagProducts.length === 0}
-              >
-                Apply
-              </Button>
-              {couponCode && (
-                <Button
-                  type="button"
-                  variant="link"
-                  onClick={() => {
-                    setCouponCode("");
-                    setCouponDraft("");
-                  }}
-                >
-                  Remove
-                </Button>
-              )}
-            </div>
             <div className="cart-subtotal">
               <span>Subtotal</span>
               <strong>{quote ? formatPrice(quote.subtotal) : "—"}</strong>
@@ -828,11 +953,12 @@ export function TrunkDialog({
               <span>Total</span>
               <strong>{quote ? formatPrice(total) : "—"}</strong>
             </div>
-            <p>Price, coupon and shipping are confirmed by the server.</p>
+            <p>Price and shipping are confirmed by the server.</p>
             <Button
+              type="button"
               className="cart-checkout-button"
               size="lg"
-              disabled={bagProducts.length === 0 || loadingQuote || catalogLoading}
+              disabled={bag.length === 0 || bagProducts.length === 0 || catalogLoading}
               onClick={onCheckout}
             >
               Checkout <ArrowUpRight />
@@ -879,7 +1005,6 @@ export function TrunkDialog({
             )}
             {chosen.length === 0 && wishlist.length === 0 && (
               <div className="empty-state">
-                <Kolam />
                 <h3>Save a few favourites for later.</h3>
                 <p>Your next favourite is just around the corner.</p>
                 <Button variant="outline" onClick={onClose}>

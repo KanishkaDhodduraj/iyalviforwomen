@@ -5,7 +5,8 @@ describe("order workflow", () => {
   it("allows only forward status transitions", () => {
     expect(canTransitionOrderStatus("placed", "packed")).toBe(true);
     expect(canTransitionOrderStatus("packed", "shipped")).toBe(true);
-    expect(canTransitionOrderStatus("shipped", "delivered")).toBe(true);
+    expect(canTransitionOrderStatus("shipped", "out_for_delivery")).toBe(true);
+    expect(canTransitionOrderStatus("out_for_delivery", "delivered")).toBe(true);
     expect(canTransitionOrderStatus("placed", "shipped")).toBe(false);
     expect(canTransitionOrderStatus("delivered", "cancelled")).toBe(false);
   });

@@ -10,6 +10,8 @@
     "test": "vitest run",
     "env:check": "tsx src/scripts/envCheck.ts",
     "seed": "tsx src/scripts/seed.ts",
+    "clear:products": "tsx src/scripts/clearProducts.ts",
+    "clear-products": "tsx src/scripts/clearProducts.ts",
     "db:indexes": "tsx src/scripts/createIndexes.ts",
     "lint": "eslint src",
     "test": "vitest run",

@@ -9,6 +9,8 @@ import { Setting } from "../models/Setting.js";
 import { calculateCartPrice } from "./pricing.js";
 import {
   decrementStock,
+  allowedPaymentMethods,
+  createOrderCreateBody,
   findOwnedOrder,
   isAllowedStatusTransition,
   orderCreateBody,
@@ -146,6 +148,26 @@ describe("server-side cart pricing", () => {
     ).rejects.toMatchObject({ status: 409 });
   });
 
+  it("prices a single-total-stock product through its One Size variant", async () => {
+    const productId = new mongoose.Types.ObjectId();
+    mockDiscounts();
+    vi.spyOn(Product, "find").mockReturnValue({
+      exec: async () => [{
+        _id: productId,
+        name: "One size wrap",
+        price: 1200,
+        mrp: 1200,
+        stock: 3,
+        sizes: [],
+        colors: [],
+      }],
+    } as never);
+    const result = await calculateCartPrice(undefined, [
+      { productId: productId.toString(), size: "One Size", color: "Default", qty: 1 },
+    ]);
+    expect(result.items[0]).toMatchObject({ originalUnitPrice: 1200, unitPrice: 1200 });
+  });
+
   it("snapshots the recalculated per-item discount in the created order", async () => {
     const productId = new mongoose.Types.ObjectId();
     const addressId = new mongoose.Types.ObjectId();
@@ -207,6 +229,7 @@ describe("server-side cart pricing", () => {
       items: [{ productId: productId.toString(), size: "M", color: "Indigo", qty: 1 }],
       addressId: addressId.toString(),
       paymentMethod: "COD",
+      demo: true,
     });
 
     expect(createOrder).toHaveBeenCalledWith(
@@ -215,6 +238,8 @@ describe("server-side cart pricing", () => {
           subtotal: 1200,
           discount: 100,
           total: 1100,
+          paymentStatus: "pending",
+          demo: true,
           items: [
             expect.objectContaining({
               unitPrice: 1100,
@@ -268,6 +293,19 @@ describe("atomic stock reservations", () => {
     await expect(
       decrementStock([{ productId: new mongoose.Types.ObjectId().toString(), size: "M", color: "Red", qty: 1 }]),
     ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("atomically decrements total stock for products without size variants", async () => {
+    const productId = new mongoose.Types.ObjectId().toString();
+    const updateOne = vi.spyOn(Product, "updateOne")
+      .mockImplementationOnce(() => ({ exec: async () => ({ modifiedCount: 0 }) }) as never)
+      .mockImplementationOnce(() => ({ exec: async () => ({ modifiedCount: 1 }) }) as never);
+    await decrementStock([{ productId, size: "One Size", color: "Default", qty: 1 }]);
+    expect(updateOne).toHaveBeenLastCalledWith(
+      { _id: productId, isActive: true, archived: { $ne: true }, stock: { $gte: 1 }, sizes: { $size: 0 } },
+      { $inc: { stock: -1 } },
+      undefined,
+    );
   });
 
   it("restores earlier decrements when a later product cannot be reserved", async () => {
@@ -326,11 +364,12 @@ describe("order ownership and transitions", () => {
       paymentMethod: "COD",
       userId: new mongoose.Types.ObjectId().toString(),
       total: 1,
+      cardNumber: "4111111111111111",
     });
     expect(result.success).toBe(false);
   });
 
-  it("accepts all four demo checkout methods without accepting gateway-specific values", () => {
+  it("accepts COD by default and only allows the four demo methods when enabled", () => {
     const orderBase = {
       items: [
         {
@@ -343,11 +382,16 @@ describe("order ownership and transitions", () => {
       addressId: new mongoose.Types.ObjectId().toString(),
     };
 
-    for (const paymentMethod of ["COD", "UPI", "CARD", "NET_BANKING"]) {
-      expect(orderCreateBody.safeParse({ ...orderBase, paymentMethod }).success).toBe(true);
+    for (const paymentMethod of ["COD", "UPI", "CARD", "NETBANKING"]) {
+      expect(createOrderCreateBody(true).safeParse({ ...orderBase, paymentMethod }).success).toBe(true);
+      expect(createOrderCreateBody(false).safeParse({ ...orderBase, paymentMethod }).success)
+        .toBe(paymentMethod === "COD");
     }
-    expect(orderCreateBody.safeParse({ ...orderBase, paymentMethod: "RAZORPAY" }).success).toBe(
+    expect(createOrderCreateBody(true).safeParse({ ...orderBase, paymentMethod: "RAZORPAY" }).success).toBe(
       false,
     );
+    expect(createOrderCreateBody(false).safeParse(orderBase).data?.paymentMethod).toBe("COD");
+    expect(allowedPaymentMethods(true)).toEqual(["COD", "UPI", "CARD", "NETBANKING"]);
+    expect(allowedPaymentMethods(false)).toEqual(["COD"]);
   });
 });

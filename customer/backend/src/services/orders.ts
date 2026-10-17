@@ -2,13 +2,15 @@ import mongoose, { type ClientSession } from "mongoose";
 import { z } from "zod";
 
 import { HttpError } from "../middleware/errors.js";
+import { env } from "../config/env.js";
 import { Address } from "../models/Address.js";
 import { Order } from "../models/Order.js";
 import { Product } from "../models/Product.js";
 import { consumeCoupon, calculateCartPrice, releaseCoupon, type CartItemInput, type CartPrice } from "./pricing.js";
 
-export const orderCreateBody = z
-  .object({
+export function createOrderCreateBody(demoPayments = env.DEMO_PAYMENTS) {
+  return z
+    .object({
     items: z.array(
       z
         .object({
@@ -21,9 +23,25 @@ export const orderCreateBody = z
     ).min(1).max(50),
     addressId: z.string().regex(/^[a-f\d]{24}$/i),
     couponCode: z.string().trim().min(1).max(40).optional(),
-    paymentMethod: z.enum(["COD", "UPI", "CARD", "NET_BANKING"]),
-  })
-  .strict();
+      paymentMethod: z.enum(["COD", "UPI", "CARD", "NETBANKING"]).default("COD"),
+    })
+    .strict()
+    .superRefine((body, context) => {
+      if (!demoPayments && body.paymentMethod !== "COD") {
+        context.addIssue({
+          code: "custom",
+          path: ["paymentMethod"],
+          message: "Only COD payments are available",
+        });
+      }
+    });
+}
+
+export function allowedPaymentMethods(demoPayments = env.DEMO_PAYMENTS): readonly string[] {
+  return demoPayments ? ["COD", "UPI", "CARD", "NETBANKING"] : ["COD"];
+}
+
+export const orderCreateBody = createOrderCreateBody();
 
 export const orderIdParams = z.object({ id: z.string().regex(/^[a-f\d]{24}$/i) }).strict();
 export const orderListQuery = z
@@ -36,39 +54,44 @@ export const adminOrderQuery = z
   .object({
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(50).default(20),
-    status: z.enum(["placed", "packed", "shipped", "delivered", "cancelled"]).optional(),
+    status: z.enum(["placed", "packed", "shipped", "out_for_delivery", "delivered", "cancelled"]).optional(),
   })
   .strict();
 export const orderStatusBody = z
-  .object({ status: z.enum(["packed", "shipped", "delivered"]) })
+  .object({ status: z.enum(["packed", "shipped", "out_for_delivery", "delivered"]) })
   .strict();
 
 export async function decrementStock(items: CartItemInput[], session?: ClientSession): Promise<void> {
   const quantities = aggregateQuantities(items);
-  const decremented: Array<[string, string, number]> = [];
+  const decremented: Array<[string, string, number, boolean]> = [];
   try {
     for (const { productId, size, qty } of quantities.values()) {
-      const result = await Product.updateOne(
-        {
-          _id: productId,
-          isActive: true,
-          archived: { $ne: true },
-          stock: { $gte: qty },
-          sizes: { $elemMatch: { size, stock: { $gte: qty } } },
-        },
+      const variantResult = await Product.updateOne(
+        { _id: productId, isActive: true, archived: { $ne: true }, stock: { $gte: qty }, sizes: { $elemMatch: { size, stock: { $gte: qty } } } },
         { $inc: { stock: -qty, "sizes.$.stock": -qty } },
         session ? { session } : undefined,
       ).exec();
-      if (result.modifiedCount !== 1) throw new HttpError(409, "Insufficient stock");
-      decremented.push([productId, size, qty]);
+      if (variantResult.modifiedCount === 1) {
+        decremented.push([productId, size, qty, true]);
+        continue;
+      }
+      if (size !== "One Size") throw new HttpError(409, "Insufficient stock");
+      const totalStockResult = await Product.updateOne(
+        { _id: productId, isActive: true, archived: { $ne: true }, stock: { $gte: qty }, sizes: { $size: 0 } },
+        { $inc: { stock: -qty } },
+        session ? { session } : undefined,
+      ).exec();
+      if (totalStockResult.modifiedCount !== 1) throw new HttpError(409, "Insufficient stock");
+      decremented.push([productId, size, qty, false]);
     }
   } catch (error) {
     if (!session) {
-      for (const [productId, size, qty] of decremented) {
-        await Product.updateOne(
-          { _id: productId, sizes: { $elemMatch: { size } } },
-          { $inc: { stock: qty, "sizes.$.stock": qty } },
-        ).exec();
+      for (const [productId, size, qty, hasSizeVariants] of decremented) {
+        if (hasSizeVariants) {
+          await Product.updateOne({ _id: productId, sizes: { $elemMatch: { size } } }, { $inc: { stock: qty, "sizes.$.stock": qty } }).exec();
+        } else {
+          await Product.updateOne({ _id: productId, sizes: { $size: 0 } }, { $inc: { stock: qty } }).exec();
+        }
       }
     }
     throw error;
@@ -80,11 +103,14 @@ export async function restoreStock(
   session?: ClientSession,
 ): Promise<void> {
   for (const { productId, size, qty } of aggregateOrderQuantities(items).values()) {
-    await Product.updateOne(
+    const variantResult = await Product.updateOne(
       { _id: productId, sizes: { $elemMatch: { size } } },
       { $inc: { stock: qty, "sizes.$.stock": qty } },
       session ? { session } : undefined,
     ).exec();
+    if (variantResult.modifiedCount === 0 && size === "One Size") {
+      await Product.updateOne({ _id: productId, sizes: { $size: 0 } }, { $inc: { stock: qty } }, session ? { session } : undefined).exec();
+    }
   }
 }
 
@@ -92,7 +118,8 @@ export function isAllowedStatusTransition(current: string, next: string): boolea
   return (
     (current === "placed" && next === "packed") ||
     (current === "packed" && next === "shipped") ||
-    (current === "shipped" && next === "delivered")
+    (current === "shipped" && next === "out_for_delivery") ||
+    (current === "out_for_delivery" && next === "delivered")
   );
 }
 
@@ -107,7 +134,8 @@ export async function reserveAndCreateOrder(
     userId: string;
     items: CartItemInput[];
     addressId: string;
-    paymentMethod: "COD" | "UPI" | "CARD" | "NET_BANKING";
+    paymentMethod: "COD" | "UPI" | "CARD" | "NETBANKING";
+    demo?: boolean;
     couponCode?: string;
     idempotencyKey?: string;
   },
@@ -144,6 +172,7 @@ export async function reserveAndCreateOrder(
           total: price.total,
           ...(price.couponCode && { couponCode: price.couponCode }),
           paymentMethod: input.paymentMethod,
+          demo: input.demo ?? env.DEMO_PAYMENTS,
           paymentStatus: "pending",
           orderStatus: "placed",
           ...(input.idempotencyKey && { idempotencyKey: input.idempotencyKey }),
@@ -202,6 +231,7 @@ export async function reserveAndCreateOrder(
         total: price.total,
         ...(price.couponCode && { couponCode: price.couponCode }),
         paymentMethod: input.paymentMethod,
+        demo: input.demo ?? env.DEMO_PAYMENTS,
         paymentStatus: "pending",
         orderStatus: "placed",
         ...(input.idempotencyKey && { idempotencyKey: input.idempotencyKey }),
