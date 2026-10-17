@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
 const defaultApiBaseUrl = apiBaseUrl ? `${apiBaseUrl}/api` : "/api";
+export const signedInThisSessionKey = "signedInThisSession";
 
 export interface AdminUser {
   id: string;
@@ -66,6 +67,9 @@ export class AdminApiClient {
       const refreshed = await this.refresh();
       if (refreshed) return this.request<T>(path, init, { retry: false });
     }
+    if (response.status === 401) {
+      sessionStorage.removeItem(signedInThisSessionKey);
+    }
     if (!response.ok) {
       const data = await response.json().catch(() => null) as { error?: string } | null;
       throw new ApiError(data?.error ?? `Request failed (${response.status})`, response.status);
@@ -124,6 +128,7 @@ export class AdminApiClient {
       const refreshed = await this.refresh();
       if (refreshed) return this.downloadResponse(path, false);
     }
+    if (response.status === 401) sessionStorage.removeItem(signedInThisSessionKey);
     if (!response.ok) {
       const data = await response.json().catch(() => null) as { error?: string } | null;
       throw new ApiError(data?.error ?? "Export could not be downloaded.", response.status);
@@ -158,5 +163,7 @@ export const authApi = {
   },
   me: () => adminApi.get<{ admin: AdminUser }>("/auth/me"),
   logout: () => adminApi.post<void>("/auth/logout"),
-  devLogin: () => adminApi.post<{ admin: AdminUser }>("/auth/dev-login"),
+  logoutAll: () => adminApi.post<void>("/auth/logout-all"),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    adminApi.post<void>("/auth/change-password", { currentPassword, newPassword }),
 };

@@ -5,6 +5,7 @@ import { Coupon } from "../models/Coupon.js";
 import { CouponRedemption } from "../models/CouponRedemption.js";
 import { Discount } from "../models/Discount.js";
 import { Product } from "../models/Product.js";
+import { Setting } from "../models/Setting.js";
 import { HttpError } from "../middleware/errors.js";
 import { priceWithDiscounts, selectApplicableDiscounts, type DiscountSnapshot } from "./discounts.js";
 
@@ -145,7 +146,9 @@ export async function calculateCartPrice(
   }
 
   const discount = productDiscountTotal + couponDiscount;
-  const shipping = discountedSubtotal - couponDiscount > 999 ? 0 : 99;
+  const setting = await Setting.findById("store-settings").select("freeShippingThreshold").lean().exec();
+  const freeShippingThreshold = setting?.freeShippingThreshold ?? 999;
+  const shipping = discountedSubtotal - couponDiscount > freeShippingThreshold ? 0 : 99;
   return {
     items: pricedItems,
     subtotal: originalSubtotal,

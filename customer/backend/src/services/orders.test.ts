@@ -5,6 +5,7 @@ import { Address } from "../models/Address.js";
 import { Discount } from "../models/Discount.js";
 import { Order } from "../models/Order.js";
 import { Product } from "../models/Product.js";
+import { Setting } from "../models/Setting.js";
 import { calculateCartPrice } from "./pricing.js";
 import {
   decrementStock,
@@ -27,6 +28,11 @@ function mockDiscounts(discounts: unknown[] = []) {
 describe("server-side cart pricing", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(Setting, "findById").mockReturnValue({
+      select: () => ({
+        lean: () => ({ exec: async () => null }),
+      }),
+    } as never);
   });
 
   it("recalculates subtotal and shipping from persisted product prices", async () => {

@@ -11,6 +11,7 @@ import { Discount } from "./models/Discount.js";
 import { Order } from "./models/Order.js";
 import { User } from "./models/User.js";
 import { ContactMessage } from "./models/ContactMessage.js";
+import { Setting } from "./models/Setting.js";
 
 async function getCsrfCredentials() {
   const response = await request(app).get("/api/auth/csrf");
@@ -177,6 +178,11 @@ describe("API security boundary", () => {
       exec: async () => [],
     };
     vi.spyOn(Discount, "find").mockReturnValue(discountQuery as never);
+    vi.spyOn(Setting, "findById").mockReturnValue({
+      select: () => ({
+        lean: () => ({ exec: async () => null }),
+      }),
+    } as never);
     vi.spyOn(Product, "find").mockReturnValue({
       exec: async () => [
         {
@@ -246,6 +252,9 @@ describe("API security boundary", () => {
       email: "customer@example.com",
       message: "A question",
     });
+    expect(message.status).toBe("new");
+    expect(message.adminNote).toBe("");
+    expect(message.readAt).toBeUndefined();
     expect(message.isRead).toBe(false);
     expect(message.isResolved).toBe(false);
     expect(ContactMessage.schema.path("isRead")?.options.index).toBe(true);
@@ -359,6 +368,7 @@ describe("API security boundary", () => {
       name: "Test customer",
       email: "customer@example.com",
       message: "Please help with an order.",
+      status: "new",
     });
 
     const invalid = await request(app)

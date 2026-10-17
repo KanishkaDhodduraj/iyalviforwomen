@@ -5,7 +5,6 @@ import { requireAdmin, requireCsrf, requireRole } from "../middleware/auth.js";
 import { writeAudit } from "../middleware/audit.js";
 import { Address } from "../models/Address.js";
 import { AuditLog } from "../models/AuditLog.js";
-import { ContactMessage } from "../models/ContactMessage.js";
 import { Coupon } from "../models/Coupon.js";
 import { CouponRedemption } from "../models/CouponRedemption.js";
 import { Discount } from "../models/Discount.js";
@@ -33,6 +32,8 @@ import { productInputSchema, productUpdateSchema, productUpdateCandidateSchema }
 import { deleteImageAssetsWhenUnused } from "../services/imageStorage.js";
 import { generateUniqueCouponCodes } from "../services/couponCodes.js";
 import { previewDiscounts, serializeDiscount, type ManagedDiscount } from "../services/discountManagement.js";
+import { messagesRouter } from "./messages.js";
+import { settingsRouter } from "./settings.js";
 
 export const adminRouter = Router();
 const idSchema = z.string().regex(/^[a-f\d]{24}$/i);
@@ -117,10 +118,6 @@ const discountPreviewBody = z.object({
   productId: z.string().trim().min(1).max(160),
   asOf: utcDateTimeSchema.optional(),
 }).strict();
-const contactUpdateBody = z.object({
-  isRead: z.boolean().optional(),
-  isResolved: z.boolean().optional(),
-}).strict().refine((value) => Object.keys(value).length > 0);
 const refundBody = z.object({
   amount: z.number().finite().positive(),
   note: z.string().trim().min(1).max(1000),
@@ -155,15 +152,13 @@ const bulkProductBody = z.object({
 }).strict().refine((value) => (value.action === "category") === (value.category !== undefined), {
   message: "Category is required only for category changes",
 });
-const messageListQuery = pageSchema.extend({
-  isRead: z.enum(["true", "false"]).optional(),
-  isResolved: z.enum(["true", "false"]).optional(),
-}).strict();
 const paymentListQuery = pageSchema.extend({
   status: z.enum(["pending", "paid", "failed", "refunded"]).optional(),
   method: z.enum(["COD", "UPI", "CARD", "NET_BANKING", "RAZORPAY"]).optional(),
 }).strict();
 adminRouter.use(requireAdmin);
+adminRouter.use("/settings", settingsRouter);
+adminRouter.use("/messages", messagesRouter);
 
 adminRouter.get("/dashboard", emptyQuery, emptyBody, requireRole("superadmin", "manager"), async (_request, response) => {
   const now = new Date();
@@ -1015,26 +1010,6 @@ adminRouter.get("/exports/orders.csv", emptyBody, emptyQuery, requireRole("super
   response.type("text/csv").attachment("orders.csv").send(rows.map((row) => row.map(cell).join(",")).join("\r\n"));
 });
 
-adminRouter.get("/messages", emptyBody, requireRole("superadmin", "manager"), async (request, response) => {
-  const { page, limit, isRead, isResolved } = messageListQuery.parse(request.query);
-  const filter = {
-    ...(isRead !== undefined && { isRead: isRead === "true" }),
-    ...(isResolved !== undefined && { isResolved: isResolved === "true" }),
-  };
-  const [items, total] = await Promise.all([
-    ContactMessage.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean().exec(),
-    ContactMessage.countDocuments(filter).exec(),
-  ]);
-  response.json({ items, page, limit, total });
-});
-adminRouter.patch("/messages/:id", emptyQuery, requireCsrf, requireRole("superadmin", "manager"), async (request, response) => {
-  const id = idSchema.parse(request.params.id);
-  const input = contactUpdateBody.parse(request.body);
-  const item = await ContactMessage.findByIdAndUpdate(id, { $set: input }, { new: true, runValidators: true }).lean().exec();
-  if (!item) return response.status(404).json({ error: "Contact message not found" });
-  await writeAudit(request, "update_contact_message", "ContactMessage", id);
-  response.json({ item });
-});
 adminRouter.get("/customers/:id/addresses", emptyBody, emptyQuery, requireRole("superadmin", "manager", "support"), async (request, response) => {
   const id = idSchema.parse(request.params.id);
   const items = await Address.find({ user: id }).lean().exec();

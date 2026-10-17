@@ -40,10 +40,15 @@ The admin API listens on `http://localhost:5001`. Configure `admin/backend/.env`
 random `ADMIN_JWT_SECRET` of at least 32 characters. Set `ADMIN_CLIENT_URL` to
 `http://localhost:8090` for local development. Bootstrap the first superadmin by supplying
 `ADMIN_EMAIL` and `ADMIN_PASSWORD` in the admin backend environment and running
-`npm --prefix admin/backend run create-admin`. There is no public admin registration.
-In local development, the admin frontend automatically creates a session for the configured
-superadmin account; this shortcut is available only on loopback and is disabled outside
-development. Production continues to require the admin email and password.
+`npm --prefix admin/backend run create-admin`. There is no public admin registration. Sign in
+from the admin login page using a provisioned administrator account.
+For a non-production environment, run `npm --prefix admin/backend run reset-admin` with
+`ADMIN_EMAIL` and `ADMIN_PASSWORD` set in the process environment to create or reset that
+superadmin; passwords must be at least 8 characters. This command refuses to run when
+`NODE_ENV=production`.
+Administrator cookies are browser-session cookies. The server maintains an eight-hour rolling
+refresh-token inactivity window. Administrators can update their profile and password, manage
+store settings, and review customer contact messages from the admin workspace.
 
 The admin frontend has its own `admin/frontend/.env.example`. Credentials and sessions are
 handled by the admin API using httpOnly cookies; no authentication tokens are stored in browser

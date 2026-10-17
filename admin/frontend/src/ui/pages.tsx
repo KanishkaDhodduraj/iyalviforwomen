@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -6,13 +6,14 @@ import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import {
   Activity, ArrowDownToLine, ArrowLeft, Boxes, CircleDollarSign, ClipboardList,
-  FileText, ImagePlus, PackageCheck, Plus, RefreshCw, ShoppingBag, TicketPercent, UsersRound,
+  Eye, EyeOff, FileText, ImagePlus, Mail, MessageCircle, PackageCheck, Plus,
+  ShoppingBag, TicketPercent, UsersRound,
 } from "lucide-react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
   Tooltip, XAxis, YAxis,
 } from "recharts";
-import { adminApi, type PageResult } from "../api";
+import { adminApi, authApi, signedInThisSessionKey, type PageResult } from "../api";
 import { useAdmin } from "../auth";
 import {
   ConfirmAction, DataTable, EmptyState, ErrorState, formatValue, PageHeader, Pagination,
@@ -539,26 +540,158 @@ function CouponForm({ onClose }: { onClose(): void }) {
 }
 
 export function MessagesPage() {
-  const [filter, setFilter] = useState("");
+  const [filter, setFilter] = useState<"all" | "new" | "read" | "resolved">("all");
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [selectedId, setSelectedId] = useState("");
   const queryClient = useQueryClient();
   const toast = useToast();
-  const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
-  if (filter) params.set("isResolved", filter);
-  const query = useQuery({ queryKey: ["admin", "messages", filter, page], queryFn: () => adminApi.get<PageResult<Row>>(`/messages?${params}`) });
-  const columns = [
-    { key: "name", label: "From" }, { key: "email", label: "Email" }, { key: "message", label: "Message", className: "message-cell" },
-    { key: "isRead", label: "Read", render: (row: Row) => status(row.isRead ? "Read" : "Unread") },
-    { key: "isResolved", label: "Resolution", render: (row: Row) => status(row.isResolved ? "Resolved" : "Open") },
-    { key: "createdAt", label: "Received" },
-    { key: "actions", label: "Action", render: (row: Row) => <button className="text-button" onClick={async () => {
-      try { await adminApi.patch(`/messages/${row._id}`, { isRead: true, isResolved: !row.isResolved }); toast(row.isResolved ? "Message reopened." : "Message resolved."); await queryClient.invalidateQueries({ queryKey: ["admin", "messages"] }); } catch (error) { toast(error instanceof Error ? error.message : "Could not update message.", "error"); }
-    }}>{row.isResolved ? "Reopen" : "Resolve"}</button> },
-  ];
+  const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE), sortBy: "createdAt", sortOrder });
+  if (filter !== "all") params.set("status", filter);
+  if (search.trim()) params.set("search", search.trim());
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  const query = useQuery({
+    queryKey: ["admin", "messages", filter, search, from, to, sortOrder, page],
+    queryFn: () => adminApi.get<PageResult<ContactMessage>>(`/messages?${params}`),
+  });
+  const detailQuery = useQuery({
+    queryKey: ["admin", "message", selectedId],
+    queryFn: async () => (await adminApi.get<{ item: ContactMessage }>(`/messages/${selectedId}`)).item,
+    enabled: Boolean(selectedId),
+  });
+  const item = detailQuery.data;
+  const admin = useAdmin().data;
+  const canDelete = admin?.role === "superadmin" || admin?.role === "manager";
+  useEffect(() => {
+    if (item) {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "messages"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin", "messages", "unread-count"] });
+    }
+  }, [item, queryClient]);
+
+  async function updateStatus(nextStatus: MessageStatus) {
+    if (!item) return;
+    try {
+      const result = await adminApi.patch<{ item: ContactMessage }>(`/messages/${item._id}/status`, { status: nextStatus });
+      queryClient.setQueryData(["admin", "message", item._id], result.item);
+      toast(nextStatus === "resolved" ? "Message resolved." : nextStatus === "read" ? "Message marked as read." : "Message reopened.");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "messages"] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "messages", "unread-count"] });
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not update message.", "error");
+    }
+  }
+
   return <>
-    <PageHeader eyebrow="CUSTOMER CARE" title="Messages" description="Review contact form messages and follow up with customers." actions={<select className="filter-select" aria-label="Filter messages" value={filter} onChange={(event) => { setFilter(event.target.value); setPage(1); }}><option value="">All messages</option><option value="false">Open</option><option value="true">Resolved</option></select>} />
-    <DataTable rows={query.data?.items ?? []} columns={columns} loading={query.isLoading} error={query.error} onRetry={() => void query.refetch()} emptyTitle="Inbox is clear" emptyMessage="Customer messages will appear here." />
-    {query.data && <Pagination page={page} limit={PAGE_SIZE} total={query.data.total} setPage={setPage} />}
+    <PageHeader eyebrow="CUSTOMER CARE" title="Messages" description="Review contact form messages and follow up with customers." />
+    <div className="message-toolbar">
+      <SearchField value={search} onChange={(value) => { setSearch(value); setPage(1); }} placeholder="Search name, email, or subject…" />
+      <label>From <input aria-label="Messages from date" type="date" className="filter-select" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} /></label>
+      <label>To <input aria-label="Messages to date" type="date" className="filter-select" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} /></label>
+      <button className="secondary-button" onClick={() => setSortOrder((value) => value === "desc" ? "asc" : "desc")}>Date {sortOrder === "desc" ? "newest first" : "oldest first"}</button>
+    </div>
+    <div className="message-filters" role="group" aria-label="Filter messages by status">
+      {(["all", "new", "read", "resolved"] as const).map((value) => <button
+        key={value}
+        className={filter === value ? "primary-button" : "secondary-button"}
+        aria-pressed={filter === value}
+        onClick={() => { setFilter(value); setPage(1); }}
+      >{value === "all" ? "All" : value === "new" ? "New" : value[0]!.toUpperCase() + value.slice(1)}</button>)}
+    </div>
+    <div className="message-workspace">
+      <section className="panel message-list" aria-label="Customer messages">
+        {query.isLoading ? <SkeletonRows /> : query.error ? <ErrorState error={query.error} retry={() => void query.refetch()} /> : !query.data?.items.length
+          ? <EmptyState title="Inbox is clear" message="Customer messages matching these filters will appear here." />
+          : query.data.items.map((message) => <button
+            key={message._id}
+            className={`message-list-item ${message._id === selectedId ? "message-selected" : ""}`}
+            onClick={() => setSelectedId(message._id)}
+          >
+            <span className="message-list-heading"><b style={{ fontWeight: messageStatus(message) === "new" ? 750 : 500 }}>{message.name}</b>{status(messageStatus(message))}</span>
+            <strong style={{ fontWeight: messageStatus(message) === "new" ? 700 : 500 }}>{message.subject || "Customer enquiry"}</strong>
+            <span>{message.email}</span>
+            <small>{new Date(message.createdAt).toLocaleString()}</small>
+          </button>)}
+        {query.data && <Pagination page={page} limit={query.data.limit} total={query.data.total} setPage={setPage} />}
+      </section>
+      <section className="panel message-detail" aria-label="Message details">
+        {!selectedId ? <EmptyState title="Select a message" message="Choose a message to read and respond." />
+          : detailQuery.isLoading ? <SkeletonRows count={5} />
+            : detailQuery.error ? <ErrorState error={detailQuery.error} retry={() => void detailQuery.refetch()} />
+              : item ? <MessageDetailPanel
+                key={item._id}
+                item={item}
+                canDelete={canDelete}
+                onStatus={updateStatus}
+                onDelete={async () => {
+                  await adminApi.delete(`/messages/${item._id}`);
+                  setSelectedId("");
+                  await queryClient.invalidateQueries({ queryKey: ["admin", "messages"] });
+                  await queryClient.invalidateQueries({ queryKey: ["admin", "messages", "unread-count"] });
+                  toast("Message deleted.");
+                }}
+              /> : null}
+      </section>
+    </div>
+  </>;
+}
+
+function MessageDetailPanel({
+  item,
+  canDelete,
+  onStatus,
+  onDelete,
+}: {
+  item: ContactMessage;
+  canDelete: boolean;
+  onStatus: (status: MessageStatus) => void;
+  onDelete: () => Promise<void>;
+}) {
+  const [note, setNote] = useState(item.adminNote ?? "");
+  const queryClient = useQueryClient();
+  const toast = useToast();
+
+  async function saveNote() {
+    try {
+      const result = await adminApi.patch<{ item: ContactMessage }>(`/messages/${item._id}/note`, { adminNote: note });
+      queryClient.setQueryData(["admin", "message", item._id], result.item);
+      toast("Internal note saved.");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not save the note.", "error");
+    }
+  }
+
+  return <>
+    <div className="message-detail-heading">
+      <div><span className="eyebrow">CUSTOMER MESSAGE</span><h2>{item.subject || "Customer enquiry"}</h2></div>
+      {status(messageStatus(item))}
+    </div>
+    <dl className="detail-pairs"><dt>From</dt><dd>{item.name}</dd><dt>Email</dt><dd><a href={`mailto:${encodeURIComponent(item.email)}`}>{item.email}</a></dd><dt>Received</dt><dd>{new Date(item.createdAt).toLocaleString()}</dd></dl>
+    <p className="message-body">{item.message}</p>
+    <div className="message-actions">
+      {messageStatus(item) === "new" && <button className="secondary-button" onClick={() => onStatus("read")}>Mark as read</button>}
+      {messageStatus(item) !== "resolved"
+        ? <button className="primary-button" onClick={() => onStatus("resolved")}>Mark resolved</button>
+        : <button className="secondary-button" onClick={() => onStatus("read")}>Reopen</button>}
+      <a className="secondary-button" href={`mailto:${encodeURIComponent(item.email)}?subject=${encodeURIComponent(`Re: ${item.subject || "Your message to Iyalvi"}`)}`}><Mail size={15} />Reply by email</a>
+      <a className="secondary-button" href={`https://wa.me/?text=${encodeURIComponent(`Hi ${item.name}, thank you for contacting Iyalvi. ${item.message}`)}`} target="_blank" rel="noreferrer"><MessageCircle size={15} />Reply on WhatsApp</a>
+      {canDelete && <ConfirmAction
+        label="Delete"
+        title="Delete this message?"
+        description="This permanently removes the customer message."
+        destructive
+        onConfirm={onDelete}
+      />}
+    </div>
+    <div className="message-note">
+      <label htmlFor="message-note">Internal note</label>
+      <textarea id="message-note" rows={4} value={note} onChange={(event) => setNote(event.target.value)} maxLength={3000} />
+      <div><small>Visible only to administrators.</small><button className="primary-button" onClick={() => void saveNote()}>Save note</button></div>
+    </div>
   </>;
 }
 
@@ -581,14 +714,206 @@ export function ReportsPage() {
   </>;
 }
 
-export function StaffPage() {
-  return <UnavailablePage title="Staff" description="Manage administrator access and staff roles." endpoint="Staff management is not available in the current admin API. Ask your system administrator to provision or update staff accounts." />;
-}
-
 export function SettingsPage() {
-  return <UnavailablePage title="Settings" description="Store preferences and administrative configuration." endpoint="Settings management is not available in the current admin API. No settings were changed." />;
+  const [tab, setTab] = useState<"profile" | "security" | "store">("profile");
+  const profileQuery = useQuery({ queryKey: ["admin", "settings", "profile"], queryFn: () => adminApi.get<{ profile: AdminProfile }>("/settings/profile") });
+  const storeQuery = useQuery({ queryKey: ["admin", "settings", "store"], queryFn: () => adminApi.get<{ store: StoreSettings }>("/settings/store") });
+  const [profileNameOverride, setProfileNameOverride] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState("");
+  const [storeOverride, setStoreOverride] = useState<StoreSettings | null>(null);
+  const profileName = profileNameOverride ?? profileQuery.data?.profile.name ?? "";
+  const store = storeOverride ?? storeQuery.data?.store ?? defaultStoreSettings;
+  const [storeError, setStoreError] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const admin = useAdmin().data;
+  const canEditStore = admin?.role === "superadmin" || admin?.role === "manager";
+  async function saveProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setProfileError("");
+    const parsed = profileSchema.safeParse({ name: profileName });
+    if (!parsed.success) {
+      setProfileError(parsed.error.issues[0]?.message ?? "Enter a valid name.");
+      return;
+    }
+    try {
+      await adminApi.patch("/settings/profile", parsed.data);
+      toast("Profile updated.");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "settings", "profile"] });
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : "Profile could not be updated.");
+    }
+  }
+
+  async function saveStore(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStoreError("");
+    const parsed = storeSettingsSchema.safeParse(store);
+    if (!parsed.success) {
+      setStoreError(parsed.error.issues[0]?.message ?? "Review the store settings.");
+      return;
+    }
+    try {
+      const result = await adminApi.patch<{ store: StoreSettings }>("/settings/store", parsed.data);
+      setStoreOverride(result.store);
+      toast("Store settings saved.");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "settings", "store"] });
+    } catch (error) {
+      setStoreError(error instanceof Error ? error.message : "Store settings could not be saved.");
+    }
+  }
+
+  async function savePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPasswordError("");
+    const parsed = passwordChangeSchema.safeParse({ currentPassword, newPassword });
+    if (!parsed.success) {
+      setPasswordError(parsed.error.issues[0]?.message ?? "Review the password requirements.");
+      return;
+    }
+    try {
+      await authApi.changePassword(parsed.data.currentPassword, parsed.data.newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      toast("Password updated. Your current session remains active.");
+    } catch (error) {
+      setPasswordError(error instanceof Error ? error.message : "Password could not be changed.");
+    }
+  }
+
+  async function signOutEverywhere() {
+    await authApi.logoutAll();
+    sessionStorage.removeItem(signedInThisSessionKey);
+    queryClient.clear();
+    await navigate("/login", { replace: true });
+  }
+
+  const loading = profileQuery.isLoading || storeQuery.isLoading;
+  const queryError = profileQuery.error ?? storeQuery.error;
+  return <>
+    <PageHeader eyebrow="ADMINISTRATION" title="Settings" description="Manage your administrator profile, security, and store preferences." />
+    <div className="settings-tabs" role="tablist" aria-label="Settings sections">
+      {(["profile", "security", "store"] as const).map((value) => <button
+        key={value}
+        type="button"
+        role="tab"
+        aria-selected={tab === value}
+        className={tab === value ? "primary-button" : "secondary-button"}
+        onClick={() => setTab(value)}
+      >{value[0]!.toUpperCase() + value.slice(1)}</button>)}
+    </div>
+    {loading ? <section className="panel"><SkeletonRows count={5} /></section>
+      : queryError ? <ErrorState error={queryError} retry={() => { void profileQuery.refetch(); void storeQuery.refetch(); }} />
+        : tab === "profile" ? <section className="panel settings-panel">
+          <h2>Administrator profile</h2><p>Your email address is read-only. Update the name shown for your account.</p>
+          <form onSubmit={(event) => void saveProfile(event)}>
+            <div className="form-grid">
+              <label>Name<input aria-label="Administrator name" value={profileName} onChange={(event) => setProfileNameOverride(event.target.value)} maxLength={100} required /></label>
+              <label>Email address<input aria-label="Profile email address" value={profileQuery.data?.profile.email ?? ""} readOnly /></label>
+            </div>
+            {profileError && <p className="field-error" role="alert">{profileError}</p>}
+            <div className="form-footer"><button className="primary-button">Save profile</button></div>
+          </form>
+        </section>
+          : tab === "security" ? <div className="settings-stack">
+            <section className="panel settings-panel">
+              <h2>Change password</h2><p>Choose a password with at least 10 characters, including a letter and a number.</p>
+              <form onSubmit={(event) => void savePassword(event)}>
+                <div className="form-grid">
+                  <label>Current password<input aria-label="Current password" type={passwordVisible ? "text" : "password"} autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /></label>
+                  <label>New password<input aria-label="New password" type={passwordVisible ? "text" : "password"} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required />
+                    <small className="muted-copy">Strength: {passwordStrength(newPassword)}</small>
+                  </label>
+                </div>
+                <div className="settings-actions">
+                  <button type="button" className="secondary-button" onClick={() => setPasswordVisible((value) => !value)}>{passwordVisible ? <EyeOff size={15} /> : <Eye size={15} />}{passwordVisible ? "Hide passwords" : "Show passwords"}</button>
+                  <button className="primary-button">Update password</button>
+                </div>
+                {passwordError && <p className="field-error" role="alert">{passwordError}</p>}
+              </form>
+            </section>
+            <section className="panel settings-panel">
+              <h2>Active devices</h2><p>Sign out from every device with an active administrator session.</p>
+              <ConfirmAction label="Sign out of all devices" title="Sign out of all devices?" description="All refresh sessions for this administrator will be revoked, including this browser session." destructive onConfirm={signOutEverywhere} />
+            </section>
+          </div>
+            : <section className="panel settings-panel">
+              <h2>Store preferences</h2><p>These settings are shared with the customer storefront.</p>
+              {!canEditStore && <p className="muted-copy">You can view these values, but only a manager or superadmin can edit them.</p>}
+              <form onSubmit={(event) => void saveStore(event)}>
+                <div className="form-grid">
+                  <label>Store name<input value={store.storeName} disabled={!canEditStore} onChange={(event) => setStoreOverride({ ...store, storeName: event.target.value })} required maxLength={100} /></label>
+                  <label>Support email<input type="email" value={store.supportEmail} disabled={!canEditStore} onChange={(event) => setStoreOverride({ ...store, supportEmail: event.target.value })} /></label>
+                  <label>Support phone<input type="tel" value={store.supportPhone} disabled={!canEditStore} onChange={(event) => setStoreOverride({ ...store, supportPhone: event.target.value })} maxLength={40} /></label>
+                  <label>WhatsApp number<input type="tel" value={store.whatsappNumber} disabled={!canEditStore} onChange={(event) => setStoreOverride({ ...store, whatsappNumber: event.target.value })} maxLength={40} /></label>
+                  <label>Free shipping threshold<input type="number" min="0" max="1000000" value={store.freeShippingThreshold} disabled={!canEditStore} onChange={(event) => setStoreOverride({ ...store, freeShippingThreshold: Number(event.target.value) })} /></label>
+                  <label>Low stock threshold<input type="number" min="0" step="1" max="1000000" value={store.lowStockThreshold} disabled={!canEditStore} onChange={(event) => setStoreOverride({ ...store, lowStockThreshold: Number(event.target.value) })} /></label>
+                  <label>Currency (ISO code)<input value={store.currency} disabled={!canEditStore} onChange={(event) => setStoreOverride({ ...store, currency: event.target.value.toUpperCase() })} minLength={3} maxLength={3} /></label>
+                </div>
+                {storeError && <p className="field-error" role="alert">{storeError}</p>}
+                {canEditStore && <div className="form-footer"><button className="primary-button">Save store settings</button></div>}
+              </form>
+            </section>}
+  </>;
 }
 
-function UnavailablePage({ title, description, endpoint }: { title: string; description: string; endpoint: string }) {
-  return <><PageHeader eyebrow="ADMINISTRATION" title={title} description={description} /><section className="panel unavailable-panel"><span className="report-icon"><RefreshCw size={20} /></span><h2>Endpoint not available</h2><p>{endpoint}</p></section></>;
+type MessageStatus = "new" | "read" | "resolved";
+type ContactMessage = {
+  _id: string;
+  name: string;
+  email: string;
+  subject?: string;
+  message: string;
+  status?: MessageStatus;
+  isRead?: boolean;
+  isResolved?: boolean;
+  adminNote?: string;
+  createdAt: string;
+};
+type AdminProfile = { name: string; email: string };
+type StoreSettings = {
+  storeName: string;
+  supportEmail: string;
+  supportPhone: string;
+  whatsappNumber: string;
+  freeShippingThreshold: number;
+  lowStockThreshold: number;
+  currency: string;
+};
+const defaultStoreSettings: StoreSettings = {
+  storeName: "Iyalvi",
+  supportEmail: "",
+  supportPhone: "",
+  whatsappNumber: "",
+  freeShippingThreshold: 999,
+  lowStockThreshold: 5,
+  currency: "INR",
+};
+const profileSchema = z.object({ name: z.string().trim().min(1).max(100) }).strict();
+const storeSettingsSchema = z.object({
+  storeName: z.string().trim().min(1).max(100),
+  supportEmail: z.string().trim().max(254).refine((email) => email === "" || z.string().email().max(254).safeParse(email).success),
+  supportPhone: z.string().trim().max(40).regex(/^[+\d\s().-]*$/),
+  whatsappNumber: z.string().trim().max(40).regex(/^[+\d\s().-]*$/),
+  freeShippingThreshold: z.number().finite().min(0).max(1_000_000),
+  lowStockThreshold: z.number().int().min(0).max(1_000_000),
+  currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/),
+}).strict();
+const passwordChangeSchema = z.object({
+  currentPassword: z.string().min(1).max(200),
+  newPassword: z.string().min(10).max(200).regex(/[A-Za-z]/, "Password must contain a letter").regex(/[0-9]/, "Password must contain a number"),
+}).strict().refine((value) => value.currentPassword !== value.newPassword, { path: ["newPassword"], message: "New password must differ from the current password" });
+
+function messageStatus(message: ContactMessage): MessageStatus {
+  return message.status ?? (message.isResolved ? "resolved" : message.isRead ? "read" : "new");
+}
+
+function passwordStrength(value: string): string {
+  const score = [value.length >= 10, /[A-Za-z]/.test(value), /\d/.test(value), /[^A-Za-z0-9]/.test(value)].filter(Boolean).length;
+  return ["Not entered", "Weak", "Fair", "Good", "Strong"][score]!;
 }

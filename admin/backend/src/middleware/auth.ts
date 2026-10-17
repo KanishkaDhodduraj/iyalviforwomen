@@ -36,7 +36,8 @@ export const requireCsrf: RequestHandler = (request, response, next) => {
 export const requireAdmin: RequestHandler = async (request, response, next) => {
   try {
     const token = request.cookies?.admin_access;
-    if (typeof token !== "string") {
+    const refreshToken = request.cookies?.admin_refresh;
+    if (typeof token !== "string" || typeof refreshToken !== "string") {
       response.status(401).json({ error: "Authentication required" });
       return;
     }
@@ -45,8 +46,30 @@ export const requireAdmin: RequestHandler = async (request, response, next) => {
       response.status(401).json({ error: "Authentication required" });
       return;
     }
-    const admin = await AdminUser.findById(payload.sub).select("_id email role").lean().exec();
-    if (!admin) {
+    const admin = await AdminUser.findById(payload.sub)
+      .select("_id email role +refreshTokenHash +refreshTokenExpiresAt")
+      .exec();
+    const presentedHash = hashToken(refreshToken);
+    if (
+      !admin ||
+      !admin.refreshTokenHash ||
+      !admin.refreshTokenExpiresAt ||
+      admin.refreshTokenExpiresAt <= new Date() ||
+      admin.refreshTokenHash.length !== presentedHash.length ||
+      !timingSafeEqual(Buffer.from(admin.refreshTokenHash), Buffer.from(presentedHash))
+    ) {
+      response.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    const activity = await AdminUser.updateOne(
+      {
+        _id: admin._id,
+        refreshTokenHash: admin.refreshTokenHash,
+        refreshTokenExpiresAt: { $gt: new Date() },
+      },
+      { $set: { refreshTokenExpiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000) } },
+    ).exec();
+    if (activity.matchedCount !== 1) {
       response.status(401).json({ error: "Authentication required" });
       return;
     }

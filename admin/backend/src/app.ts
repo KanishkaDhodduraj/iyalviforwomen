@@ -23,7 +23,19 @@ const uploadDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../../
 app.disable("x-powered-by");
 app.set("trust proxy", env.TRUST_PROXY === "1" || env.TRUST_PROXY === "true");
 app.use(helmet());
-app.use(cors({ origin: env.ADMIN_CLIENT_URL, credentials: true }));
+const allowedAdminOrigins = env.NODE_ENV === "development"
+  ? ["http://localhost:8090", "http://127.0.0.1:8090"]
+  : [env.ADMIN_CLIENT_URL];
+app.use(cors({
+  credentials: true,
+  origin(origin, callback) {
+    if (!origin) {
+      callback(null, false);
+      return;
+    }
+    callback(null, allowedAdminOrigins.includes(origin) ? origin : false);
+  },
+}));
 app.use(compression());
 app.use(express.json({ limit: "10kb" }));
 app.use(cookieParser());
@@ -61,6 +73,6 @@ app.use("/api/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, stand
 app.use("/api/auth", authRouter);
 app.use("/api/products", requireAdmin, productImageRouter);
 app.use("/api/reports", requireAdmin, reportsRouter);
-app.use("/api", requireAdmin, adminRouter);
+app.use("/api", adminRouter);
 app.use(notFound);
 app.use(errorHandler);

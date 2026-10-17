@@ -3,6 +3,7 @@ import { Schema, model } from "mongoose";
 const adminUserSchema = new Schema(
   {
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    name: { type: String, trim: true, maxlength: 100, default: "" },
     passwordHash: { type: String, required: true, select: false },
     role: {
       type: String,
@@ -14,6 +15,8 @@ const adminUserSchema = new Schema(
     refreshTokenExpiresAt: { type: Date, select: false },
     failedLoginAttempts: { type: Number, default: 0, select: false },
     lockUntil: { type: Date, select: false },
+    passwordChangeFailedAttempts: { type: Number, default: 0, select: false },
+    passwordChangeLockUntil: { type: Date, select: false },
   },
   { timestamps: true },
 );
