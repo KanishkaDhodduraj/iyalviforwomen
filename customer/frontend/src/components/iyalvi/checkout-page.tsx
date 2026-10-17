@@ -13,9 +13,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Brand, Kolam } from "@/components/iyalvi/motifs";
+import { Brand } from "@/components/iyalvi/motifs";
 import { LoginDialog } from "@/components/iyalvi/account-control";
-import { formatPrice, products } from "@/data/products";
+import { formatPrice } from "@/data/products";
 import { usePrototype } from "@/data/store";
 import {
   api,
@@ -27,10 +27,11 @@ import {
   type ApiProduct,
 } from "@/lib/api";
 import { z } from "zod";
+import { useCustomerTheme } from "@/hooks/use-customer-theme";
 
 type CheckoutStep = "details" | "payment" | "done";
 type PaymentMethod = "UPI" | "Card" | "Net Banking" | "Cash on Delivery";
-type OrderPaymentMethod = "UPI" | "CARD" | "NET_BANKING" | "COD";
+type OrderPaymentMethod = "UPI" | "CARD" | "NETBANKING" | "COD";
 
 const paymentMethods: {
   name: PaymentMethod;
@@ -42,8 +43,15 @@ const paymentMethods: {
   { name: "Net Banking", icon: Landmark, note: "Demo only · no charge" },
   { name: "Cash on Delivery", icon: MapPin, note: "Pay when your order arrives" },
 ];
+const apiMethodLabels: Record<string, PaymentMethod> = {
+  COD: "Cash on Delivery",
+  UPI: "UPI",
+  CARD: "Card",
+  NETBANKING: "Net Banking",
+};
 
 export function CheckoutPage() {
+  useCustomerTheme();
   const navigate = useNavigate();
   const customer = usePrototype((state) => state.customer);
   const bag = usePrototype((state) => state.bag);
@@ -55,6 +63,10 @@ export function CheckoutPage() {
   const [loginOpen, setLoginOpen] = useState(false);
   const [step, setStep] = useState<CheckoutStep>("details");
   const [method, setMethod] = useState<PaymentMethod>("Cash on Delivery");
+  const methodRef = useRef(method);
+  const [enabledPaymentMethods, setEnabledPaymentMethods] = useState<PaymentMethod[]>([
+    "Cash on Delivery",
+  ]);
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
   const [address, setAddress] = useState("");
@@ -62,6 +74,9 @@ export function CheckoutPage() {
   const [state, setState] = useState("");
   const [pincode, setPincode] = useState("");
   const [couponCode, setCouponCode] = useState("");
+  const [couponDraft, setCouponDraft] = useState("");
+  const [couponBusy, setCouponBusy] = useState(false);
+  const [couponMessage, setCouponMessage] = useState("");
   const [selectedAddressId, setSelectedAddressId] = useState("");
   const [serverAddresses, setServerAddresses] = useState<ApiAddress[]>([]);
   const [catalog, setCatalog] = useState<ApiProduct[]>([]);
@@ -98,6 +113,10 @@ export function CheckoutPage() {
       active = false;
     };
   }, [hydrateSession]);
+
+  useEffect(() => {
+    if (ready && !customer) setLoginOpen(true);
+  }, [customer, ready]);
 
   useEffect(() => {
     if (!ready) return;
@@ -141,13 +160,38 @@ export function CheckoutPage() {
       .finally(() => setCatalogLoaded(true));
   }, [customer]);
 
+  useEffect(() => {
+    let active = true;
+    void api
+      .get<{ methods: string[] }>("/payment-options")
+      .then(({ methods }) => {
+        if (active) {
+          const allowed = methods.map((value) => apiMethodLabels[value]).filter(Boolean);
+          setEnabledPaymentMethods(allowed.length ? allowed : ["Cash on Delivery"]);
+          if (!allowed.includes(methodRef.current)) {
+            const fallback = allowed[0] ?? "Cash on Delivery";
+            methodRef.current = fallback;
+            setMethod(fallback);
+          }
+        }
+      })
+      .catch((cause: unknown) => {
+        if (active) {
+          setEnabledPaymentMethods(["Cash on Delivery"]);
+          methodRef.current = "Cash on Delivery";
+          setError(cause instanceof Error ? cause.message : "Payment options could not be loaded.");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const bagItems = useMemo(
     () =>
       bag.flatMap((item) => {
         const serverProduct = apiProductForCartItem(item.id, catalog);
-        const product =
-          (serverProduct && productFromApi(serverProduct)) ??
-          products.find((candidate) => candidate.id === item.id);
+        const product = serverProduct ? productFromApi(serverProduct) : undefined;
         return product
           ? [
               {
@@ -182,6 +226,8 @@ export function CheckoutPage() {
       setQuote(null);
       return;
     }
+    let active = true;
+    setQuote(null);
     void api
       .post<{
         items: Array<{ product: string; unitPrice: number }>;
@@ -193,17 +239,57 @@ export function CheckoutPage() {
         items: pricingItems,
         ...(couponCode.trim() && { couponCode: couponCode.trim() }),
       })
-      .then(setQuote)
+      .then((result) => {
+        if (active) setQuote(result);
+      })
       .catch((error: unknown) => {
-        setQuote(null);
-        setOrderError(
-          error instanceof Error ? error.message : "The order price could not be checked.",
-        );
+        if (active) {
+          setQuote(null);
+          setOrderError(
+            error instanceof Error ? error.message : "The order price could not be checked.",
+          );
+        }
       });
+    return () => {
+      active = false;
+    };
   }, [customer, bag.length, bagItems, pricingItems, couponCode]);
   const missingServerProducts = bagItems.some((item) => !item.serverProductId);
   const total = quote?.total ?? 0;
   const stepIndex = step === "details" ? 1 : step === "payment" ? 2 : 3;
+
+  const applyCoupon = async () => {
+    const code = couponDraft.trim().toUpperCase();
+    if (!code || pricingItems.length === 0) {
+      setCouponMessage("Enter a coupon code.");
+      return;
+    }
+    setCouponBusy(true);
+    setCouponMessage("");
+    try {
+      await api.post<{ valid: true; code: string; discount: number; total: number }>(
+        "/coupons/validate",
+        { code, items: pricingItems },
+      );
+      setCouponCode(code);
+      setCouponDraft(code);
+      setCouponMessage("Coupon applied. Your order total is being refreshed.");
+      setError("");
+    } catch (cause) {
+      setCouponCode("");
+      setCouponMessage(
+        cause instanceof Error ? cause.message : "This coupon could not be validated.",
+      );
+    } finally {
+      setCouponBusy(false);
+    }
+  };
+
+  const removeCoupon = () => {
+    setCouponCode("");
+    setCouponDraft("");
+    setCouponMessage("Coupon removed.");
+  };
 
   const continueToPayment = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -292,7 +378,7 @@ export function CheckoutPage() {
     return (
       <main className="checkout-gate">
         <LoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
-        <Brand />
+        <Brand compact />
         <h1>Sign in to check out</h1>
         <p>Log in to confirm your details and finish your order.</p>
         <Button onClick={() => setLoginOpen(true)}>Sign in to continue</Button>
@@ -301,10 +387,10 @@ export function CheckoutPage() {
     );
   }
 
-  if (bagItems.length === 0 && step !== "done") {
+  if (catalogLoaded && bagItems.length === 0 && step !== "done") {
     return (
       <main className="checkout-gate">
-        <Brand />
+        <Brand compact />
         <h1>Your bag is empty</h1>
         <p>Find something that feels like you, then come back to check out.</p>
         <Link to="/" className="checkout-back-link">
@@ -318,7 +404,7 @@ export function CheckoutPage() {
     <main className={`checkout-page checkout-step-${step}`}>
       <header className="checkout-header">
         <Link to="/" aria-label="Back to IYALVI home">
-          <Brand />
+          <Brand compact />
         </Link>
         <span>YOUR BAG, YOUR WAY</span>
       </header>
@@ -486,58 +572,86 @@ export function CheckoutPage() {
           >
             <span className="eyebrow">STEP 2 · PAYMENT</span>
             <h1 className="checkout-heading">How would you like to pay?</h1>
-            <p className="checkout-intro">
-              Choose a demo payment option. No online payment will be processed.
-            </p>
+            <p className="checkout-intro">Choose a payment option.</p>
             <form
               className="checkout-form payment-form"
               onSubmit={(event) => void placeOrder(event)}
             >
               <div className="payment-method-list">
-                {paymentMethods.map(({ name: option, icon: Icon, note }) => (
-                  <label
-                    className={`payment-method ${method === option ? "is-selected" : ""}`}
-                    key={option}
-                  >
-                    <input
-                      type="radio"
-                      name="payment-method"
-                      value={option}
-                      checked={method === option}
-                      onChange={() => {
-                        setMethod(option);
-                        setError("");
-                      }}
-                    />
-                    <Icon />
-                    <span>
-                      <strong>{option}</strong>
-                      <small>{note}</small>
-                    </span>
-                  </label>
-                ))}
+                {paymentMethods
+                  .filter(({ name }) => enabledPaymentMethods.includes(name))
+                  .map(({ name: option, icon: Icon, note }) => (
+                    <label
+                      className={`payment-method ${method === option ? "is-selected" : ""}`}
+                      key={option}
+                    >
+                      <input
+                        type="radio"
+                        name="payment-method"
+                        value={option}
+                        checked={method === option}
+                        onChange={() => {
+                          methodRef.current = option;
+                          setMethod(option);
+                          setError("");
+                        }}
+                      />
+                      <Icon />
+                      <span>
+                        <strong>{option}</strong>
+                        <small>{note}</small>
+                      </span>
+                    </label>
+                  ))}
               </div>
-              <label className="checkout-field">
-                Coupon code
-                <Input
-                  value={couponCode}
-                  onChange={(event) =>
-                    setCouponCode(
-                      event.target.value
-                        .toUpperCase()
-                        .replace(/[^A-Z0-9_-]/g, "")
-                        .slice(0, 40),
-                    )
-                  }
-                  maxLength={40}
-                />
-              </label>
-              {quote && (
-                <p className="demo-payment-note">
-                  Demo checkout only: no payment details are collected and no charge is made. Your
-                  order total is verified by the server.
-                </p>
-              )}
+              <div className="checkout-coupon">
+                <label className="checkout-field" htmlFor="checkout-coupon-code">
+                  Coupon code
+                </label>
+                <div className="checkout-coupon-controls">
+                  <Input
+                    id="checkout-coupon-code"
+                    value={couponDraft}
+                    onChange={(event) => {
+                      setCouponDraft(
+                        event.target.value
+                          .toUpperCase()
+                          .replace(/[^A-Z0-9_-]/g, "")
+                          .slice(0, 40),
+                      );
+                      setCouponMessage("");
+                    }}
+                    maxLength={40}
+                    disabled={couponBusy}
+                  />
+                  {couponCode ? (
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="coupon-remove-link"
+                      onClick={removeCoupon}
+                      disabled={couponBusy}
+                    >
+                      Remove
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void applyCoupon()}
+                      disabled={couponBusy || !couponDraft.trim() || !pricingItems.length}
+                    >
+                      {couponBusy ? "Checking…" : "Apply"}
+                    </Button>
+                  )}
+                </div>
+                {couponMessage && (
+                  <p className={couponCode ? "coupon-success" : "form-error"} role="status">
+                    {couponMessage}
+                  </p>
+                )}
+              </div>
+              <p className="demo-payment-note">Demo mode: no real payment is taken.</p>
               {error && (
                 <p className="form-error checkout-error" role="alert">
                   {error}
@@ -554,10 +668,10 @@ export function CheckoutPage() {
                   disabled={submitting || !quote}
                 >
                   {submitting
-                    ? "Placing demo order…"
+                    ? "Placing order…"
                     : method === "Cash on Delivery"
                       ? "Place COD order"
-                      : "Place demo order"}{" "}
+                      : "Place order"}{" "}
                   · {formatPrice(total)}
                   <ArrowRight />
                 </Button>
@@ -606,8 +720,7 @@ export function CheckoutPage() {
             <span className="eyebrow">STEP 3 · ALL DONE</span>
             <h1>You’re all set!</h1>
             <p>
-              Your demo order <strong>{orderId}</strong> is confirmed. No online payment was
-              processed.
+              Your order <strong>{orderId}</strong> is confirmed.
             </p>
             <div className="success-order-card">
               <span>Order total</span>
@@ -694,8 +807,7 @@ export function CheckoutPage() {
         )}
       </div>
       <footer className="checkout-footer">
-        <Kolam />
-        <span>Secure checkout · Online payment methods are demo only.</span>
+        <span>Checkout</span>
         <Link to="/">Keep shopping</Link>
       </footer>
     </main>
@@ -709,7 +821,7 @@ function paymentMethodToApi(method: PaymentMethod): OrderPaymentMethod {
     case "Card":
       return "CARD";
     case "Net Banking":
-      return "NET_BANKING";
+      return "NETBANKING";
     case "Cash on Delivery":
       return "COD";
   }

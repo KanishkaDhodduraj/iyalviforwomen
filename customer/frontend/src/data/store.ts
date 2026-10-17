@@ -10,7 +10,6 @@ import {
   type ApiUser,
 } from "@/lib/api";
 
-export type Locale = "en" | "ta" | "hi";
 type BagItem = { id: string; quantity: number; size?: string; color?: string };
 const persistedBagSchema = z.array(
   z
@@ -41,7 +40,6 @@ export type DemoOrder = {
 };
 type PrototypeState = {
   theme: "day" | "dusk";
-  locale: Locale;
   wishlist: string[];
   bag: BagItem[];
   recent: string[];
@@ -51,7 +49,6 @@ type PrototypeState = {
   addresses: CustomerAddress[];
   orders: DemoOrder[];
   setTheme: (theme: "day" | "dusk") => void;
-  setLocale: (locale: Locale) => void;
   toggleWish: (id: string) => void;
   addToBag: (id: string, size?: string, color?: string) => void;
   changeQuantity: (id: string, delta: number) => void;
@@ -107,7 +104,6 @@ export const usePrototype = create<PrototypeState>()(
   persist<PrototypeState, [], [], Pick<PrototypeState, "bag">>(
     (set) => ({
       theme: "day",
-      locale: "en",
       wishlist: [],
       bag: [],
       recent: [],
@@ -117,7 +113,6 @@ export const usePrototype = create<PrototypeState>()(
       addresses: [],
       orders: [],
       setTheme: (theme) => set({ theme }),
-      setLocale: (locale) => set({ locale }),
       toggleWish: (id) => {
         let removing = false;
         set((s) => {
@@ -280,7 +275,9 @@ export const usePrototype = create<PrototypeState>()(
     {
       name: "iyalvi-prototype-v1",
       version: 1,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() =>
+        typeof window === "undefined" ? undefined : window.localStorage,
+      ),
       skipHydration: true,
       partialize: (state) => ({
         bag: state.bag.map(({ id, quantity }) => ({ id, quantity })),

@@ -1,4 +1,5 @@
 import { useEffect, useId, useState, type FormEvent } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { z } from "zod";
 import {
   Check,
@@ -166,6 +167,7 @@ export function AccountControl({
   onWishlist: () => void;
   className?: string;
 }) {
+  const navigate = useNavigate();
   const customer = usePrototype((state) => state.customer);
   const setCustomer = usePrototype((state) => state.setCustomer);
   const hydrateSession = usePrototype((state) => state.hydrateSession);
@@ -262,7 +264,7 @@ export function AccountControl({
               <UserRoundPen />
               My Profile
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setPanel("orders")}>
+            <DropdownMenuItem onSelect={() => void navigate({ to: "/my-orders" })}>
               <Package />
               My Orders
             </DropdownMenuItem>

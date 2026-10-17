@@ -21,7 +21,6 @@ const userSchema = new Schema(
     lockUntil: { type: Date, select: false },
     refreshTokenHash: { type: String, select: false },
     refreshTokenExpiresAt: { type: Date, select: false },
-    lastSpinAt: { type: Date },
     addressCount: { type: Number, min: 0, default: 0 },
   },
   { timestamps: { createdAt: true, updatedAt: false } },

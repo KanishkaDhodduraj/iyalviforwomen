@@ -1,16 +1,7 @@
 {
   "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "https://iyalviforwomen-admin.vercel.app/*"
-    },
-    {
-      "source": "/uploads/:path*",
-      "destination": "https://iyalviforwomen-admin.vercel.app/*"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+    { "source": "/api/:path*", "destination": "https://iyalviforwomen-mu.vercel.app/api/:path*" },
+    { "source": "/uploads/:path*", "destination": "https://iyalviforwomen-mu.vercel.app/uploads/:path*" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

@@ -43,6 +43,7 @@ const ChartContainer = React.forwardRef<
   const chartId = `chart-${id || uniqueId.replace(/:/g, "")}`;
   const [darkMode, setDarkMode] = React.useState(false);
   React.useEffect(() => {
+    if (typeof document === "undefined") return;
     const root = document.documentElement;
     const update = () => setDarkMode(root.classList.contains("dark"));
     update();

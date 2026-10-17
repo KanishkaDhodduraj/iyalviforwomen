@@ -27,21 +27,20 @@ const productSchema = new Schema(
     sku: { type: String, unique: true, sparse: true, uppercase: true, trim: true, maxlength: 80 },
     name: { type: String, required: true, trim: true, maxlength: 200 },
     description: { type: String, trim: true, maxlength: 5000, default: "" },
-    category: { type: String, required: true, enum: ["saree", "kurti"], index: true },
-    subCategory: { type: String, required: true, trim: true, maxlength: 100 },
-    fabric: { type: String, required: true, trim: true, index: true, maxlength: 100 },
-    occasion: { type: String, required: true, trim: true, index: true, maxlength: 100 },
-    colors: { type: [String], required: true, validate: (values: string[]) => values.length > 0 },
+    category: { type: String, enum: ["saree", "kurti"], index: true },
+    subCategory: { type: String, trim: true, maxlength: 100, default: "" },
+    fabric: { type: String, trim: true, index: true, maxlength: 100, default: "" },
+    colors: { type: [String], default: [] },
     sizes: {
       type: [productSizeSchema],
-      required: true,
+      default: [],
       validate: {
         validator: (values: Array<{ size: string }>) =>
-          values.length > 0 && new Set(values.map((item) => item.size.toLowerCase())).size === values.length,
-        message: "Product sizes must be non-empty and unique",
+          new Set(values.map((item) => item.size.toLowerCase())).size === values.length,
+        message: "Product sizes must be unique",
       },
     },
-    price: { type: Number, required: true, min: 0 },
+    price: { type: Number, required: true, min: 0, default: 0 },
     mrp: { type: Number, required: true, min: 0 },
     costPrice: { type: Number, min: 0, select: false },
     images: {
@@ -58,9 +57,10 @@ const productSchema = new Schema(
       },
     },
     tags: { type: [String], default: [], validate: (values: string[]) => values.length <= 50 },
-    stock: { type: Number, required: true, min: 0, default: 0, index: true },
+    stock: { type: Number, required: true, min: 0, max: 1_000_000, default: 0, index: true },
     isActive: { type: Boolean, required: true, default: true, index: true },
     isFeatured: { type: Boolean, required: true, default: false, index: true },
+    isNewArrival: { type: Boolean, required: true, default: false, index: true },
     archived: { type: Boolean, required: true, default: false, index: true },
     createdBy: { type: Schema.Types.ObjectId, ref: "AdminUser" },
   },
@@ -68,10 +68,10 @@ const productSchema = new Schema(
 );
 
 productSchema.pre("validate", function () {
-  if (this.sizes) this.stock = this.sizes.reduce((total, item) => total + item.stock, 0);
+  if (this.sizes?.length) this.stock = this.sizes.reduce((total, item) => total + item.stock, 0);
 });
 productSchema.index({ category: 1, isActive: 1, price: 1 });
-productSchema.index({ name: "text", description: "text", fabric: "text", occasion: "text", tags: "text" });
+productSchema.index({ name: "text", description: "text", fabric: "text", tags: "text" });
 productSchema.index({ stock: 1, isActive: 1 });
 
 export const Product = model("Product", productSchema);

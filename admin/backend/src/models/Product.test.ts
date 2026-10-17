@@ -9,7 +9,6 @@ const validProduct = () => new Product({
   category: "saree",
   subCategory: "Handloom",
   fabric: "Cotton",
-  occasion: "Festive",
   colors: ["Rose"],
   sizes: [{ size: "Free", stock: 4 }],
   price: 2400,

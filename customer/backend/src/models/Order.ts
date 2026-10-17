@@ -44,7 +44,7 @@ const addressSnapshotSchema = new Schema(
 
 const statusHistorySchema = new Schema(
   {
-    status: { type: String, enum: ["placed", "packed", "shipped", "delivered", "cancelled"], required: true },
+    status: { type: String, enum: ["placed", "packed", "shipped", "out_for_delivery", "delivered", "cancelled"], required: true },
     changedBy: { type: Schema.Types.ObjectId, ref: "AdminUser", required: true },
     at: { type: Date, required: true, default: Date.now },
     note: { type: String, trim: true, maxlength: 1000 },
@@ -73,10 +73,11 @@ const orderSchema = new Schema(
     couponCode: { type: String, uppercase: true, trim: true },
     paymentMethod: {
       type: String,
-      enum: ["COD", "UPI", "CARD", "NET_BANKING", "RAZORPAY"],
+      enum: ["COD", "UPI", "CARD", "NETBANKING"],
       required: true,
       default: "COD",
     },
+    demo: { type: Boolean, required: true, default: false },
     paymentStatus: {
       type: String,
       enum: ["pending", "paid", "failed", "refunded"],
@@ -85,7 +86,7 @@ const orderSchema = new Schema(
     },
     orderStatus: {
       type: String,
-      enum: ["placed", "packed", "shipped", "delivered", "cancelled"],
+      enum: ["placed", "packed", "shipped", "out_for_delivery", "delivered", "cancelled"],
       required: true,
       default: "placed",
     },

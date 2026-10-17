@@ -13,7 +13,12 @@ import {
   verifyPhoneOtp,
 } from "../controllers/authController.js";
 import { HttpError } from "../middleware/errors.js";
-import { authRateLimit } from "../middleware/rateLimit.js";
+import {
+  authMeRateLimit,
+  authRateLimit,
+  loginRateLimit,
+  registerRateLimit,
+} from "../middleware/rateLimit.js";
 import { csrfProtection, requireAuth } from "../middleware/auth.js";
 import { validateRequest } from "../middleware/validate.js";
 
@@ -59,14 +64,14 @@ authRouter.get(
 );
 authRouter.post(
   "/register",
-  authRateLimit,
+  registerRateLimit,
   csrfProtection,
   validateRequest({ body: registerBody }),
   register,
 );
 authRouter.post(
   "/login",
-  authRateLimit,
+  loginRateLimit,
   csrfProtection,
   validateRequest({ body: loginBody }),
   login,
@@ -94,6 +99,7 @@ authRouter.post(
 );
 authRouter.get(
   "/me",
+  authMeRateLimit,
   validateRequest({ query: z.object({}).strict() }),
   requireAuth,
   me,

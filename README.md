@@ -40,18 +40,22 @@ The admin API listens on `http://localhost:5001`. Configure `admin/backend/.env`
 random `ADMIN_JWT_SECRET` of at least 32 characters. Set `ADMIN_CLIENT_URL` to
 `http://localhost:8090` for local development. Bootstrap the first superadmin by supplying
 `ADMIN_EMAIL` and `ADMIN_PASSWORD` in the admin backend environment and running
-`npm --prefix admin/backend run create-admin`. There is no public admin registration.
-In local development, the admin frontend automatically creates a session for the configured
-superadmin account; this shortcut is available only on loopback and is disabled outside
-development. Production continues to require the admin email and password.
+`npm --prefix admin/backend run create-admin`. There is no public admin registration. Sign in
+from the admin login page using a provisioned administrator account.
+For a non-production environment, run `npm --prefix admin/backend run reset-admin` with
+`ADMIN_EMAIL` and `ADMIN_PASSWORD` set in the process environment to create or reset that
+superadmin; passwords must be at least 8 characters. This command refuses to run when
+`NODE_ENV=production`.
+Administrator cookies are browser-session cookies. The server maintains an eight-hour rolling
+refresh-token inactivity window. Review customer contact messages in the admin workspace.
 
 The admin frontend has its own `admin/frontend/.env.example`. Credentials and sessions are
 handled by the admin API using httpOnly cookies; no authentication tokens are stored in browser
 storage.
 
-Admin product images are processed locally and served from `/uploads/products/`. The shared
-`uploads/` storage directory is ignored by Git except for its empty placeholders; generated
-images and thumbnails are not committed.
+In production, admin product uploads require a cloud-backed `ImageStorage` implementation.
+Until one is configured, upload requests return HTTP 503; creating and editing products without
+images continues to work. Local development stores processed image files under `/uploads/products/`.
 
 Admin report exports are available at
 `GET /api/reports/{sales|customers|payments|orders|inventory|discounts}?from=YYYY-MM-DD&to=YYYY-MM-DD&format=csv|xlsx|pdf`
@@ -66,48 +70,55 @@ The storefront is served at the URL printed by Vite (usually `http://localhost:5
 The backend listens on `http://localhost:5000`; the Vite dev server proxies `/api` requests
 to it.
 
-## Deploying to Vercel and Render
+## Deploying to Vercel
 
-Deploy each frontend as its own Vercel project:
+Deploy four separate Vercel projects from this repository. Use these project root directories
+and build settings:
 
-| Project | Root Directory | Build Command | Output |
+| Project | Root Directory | Build Command | Output Directory |
 | --- | --- | --- | --- |
-| Customer storefront | `customer/frontend` | `npm run build` | Keep the Nitro/Vercel output setting at its default |
+| Customer storefront | `customer/frontend` | `npm run build` | Nitro/Vercel default |
+| Customer API | `customer/backend` | `npm run build` | Leave unset; deploy the `api/index.ts` function |
 | Admin dashboard | `admin/frontend` | `npm run build` | `dist` |
+| Admin API | `admin/backend` | `npm run build` | Leave unset; deploy the `api/index.ts` function |
 
-Use Node.js 20 or later for both projects. Do not override the install command; Vercel can use
-the `package-lock.json` in each project root. The admin dashboard's rewrite sends SPA routes to
-`index.html`.
+Use Node.js 20 or later and the package manager's default install command in each project.
+Both API projects route requests to their serverless Express handler, set a 30-second function
+duration, and connect to MongoDB on the first request. Configure the MongoDB network access
+rules to allow Vercel's deployments.
 
-Both frontends leave `VITE_API_BASE_URL` empty by default, which routes API requests through
-their same-origin `/api` Vercel rewrite. In each frontend's `vercel.json`, replace
-`REPLACE-WITH-RENDER-URL` in both destinations with that frontend's matching Render service
-hostname, for example `iyalvi-customer-api.onrender.com` or `iyalvi-admin-api.onrender.com`.
-Keep `https://` and do not include a trailing slash or `/api`. The Vercel configuration files
-are strict JSON and cannot contain comments; this paragraph documents the placeholder replacement.
-If setting `VITE_API_BASE_URL` to a backend URL instead, use the backend origin without `/api`
-and set that backend's `COOKIE_SAME_SITE=none` so secure cookies can be sent cross-site.
+For both frontend projects, leave `VITE_API_BASE_URL` empty to use same-origin `/api` calls.
+In `customer/frontend/vercel.json`, replace `REPLACE-WITH-CUSTOMER-API-VERCEL-DOMAIN` with
+the customer API project's Vercel hostname and `REPLACE-WITH-ADMIN-API-VERCEL-DOMAIN` with
+the admin API project's hostname. In `admin/frontend/vercel.json`, replace
+`REPLACE-WITH-ADMIN-API-VERCEL-DOMAIN` with the admin API hostname. Keep the `https://`
+scheme and omit a trailing slash. The SPA rewrite for the admin frontend stays after its API
+rewrites.
 
-The root `render.yaml` defines both backend services. Deploy it as a Render Blueprint; each
-service uses `npm install && npm run build`, `npm start`, and `/api/health` for health checks.
-Set these service environment variables in Render:
+Configure backend environment variables in each API project's Vercel Project Settings:
 
-| Service | Required variables |
+| Project | Environment variable names |
 | --- | --- |
-| Customer API | `DATABASE_URL`, `JWT_SECRET` (at least 32 characters), `CLIENT_URL` (the exact customer Vercel origin) |
-| Admin API | `DATABASE_URL`, `ADMIN_JWT_SECRET` (at least 32 characters), `ADMIN_CLIENT_URL` (the exact admin Vercel origin) |
+| Customer API | `DATABASE_URL`, `JWT_SECRET`, `CLIENT_URL`, `NODE_ENV`, `TRUST_PROXY`, `COOKIE_SAME_SITE`, optional `DEMO_PAYMENTS` |
+| Admin API | `DATABASE_URL`, `ADMIN_JWT_SECRET`, `ADMIN_CLIENT_URL`, `NODE_ENV`, `TRUST_PROXY`, `COOKIE_SAME_SITE`, `CRON_SECRET` |
 
-The Blueprint sets `NODE_ENV=production` and `TRUST_PROXY=1`. Cookie SameSite defaults to
-`lax` for same-origin Vercel proxy rewrites; set `COOKIE_SAME_SITE=none` only when calling a
-backend cross-site directly from a frontend, and keep production HTTPS enabled.
+Set `NODE_ENV=production`, `TRUST_PROXY=1`, and `COOKIE_SAME_SITE=lax` for same-origin
+frontend proxy rewrites. Set `CLIENT_URL` and `ADMIN_CLIENT_URL` to the exact deployed
+customer and admin frontend origins respectively. Set `DEMO_PAYMENTS=true` only when demo
+payment orders are desired. Set a high-entropy `CRON_SECRET`; Vercel calls the admin API's
+promotion-expiry endpoint daily at 02:00 UTC and supplies the bearer secret.
+
+Admin product image uploads return HTTP 503 with `Image storage not configured` in production
+until a cloud-backed `ImageStorage` implementation is configured. Creating and editing
+products without uploading images remains available. Local disk uploads are for development
+only.
 
 ## Backend setup
 
-Create `customer/backend/.env` locally (it is ignored by Git) with a MongoDB connection URI,
-a random `JWT_SECRET` of at least 32 characters, and `CLIENT_URL`. The server accepts either
-`DATABASE_URL` or the Atlas-style `MONGODB_URI` variable. Google sign-in and online payments
-are disabled; no Google or payment secrets are required. Never put credentials in frontend
-environment variables or commit them.
+The customer backend needs `DATABASE_URL` (or `MONGODB_URI`), `JWT_SECRET` (at least 32
+characters), and `CLIENT_URL`. `DEMO_PAYMENTS` is optional and defaults to disabled. When
+enabled, checkout records a demo order without contacting a payment gateway or collecting
+card numbers. Never put credentials in frontend environment variables or commit them.
 
 ```sh
 npm --prefix customer/backend run db:indexes
@@ -115,8 +126,9 @@ npm --prefix customer/backend run seed
 ```
 
 Create indexes before seeding; production disables automatic index creation, so run the
-index command during database setup and after model index changes. The seed command upserts the
-existing frontend catalog without resetting stock on later runs. Browser clients must first fetch
+index command during database setup and after model index changes. The seed command creates
+only the default store settings document; products and media are managed from the admin app.
+Browser clients must first fetch
 `GET /api/auth/csrf` with credentials enabled, then send the returned `x-csrf-token` header and
 cookies with state-changing requests. Sessions use httpOnly cookies; the API does not return
 access or refresh tokens in JSON.

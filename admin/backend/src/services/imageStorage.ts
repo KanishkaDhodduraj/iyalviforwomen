@@ -9,6 +9,10 @@ const storageDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../..
 const acceptedFormats = new Set(["image/jpeg", "image/png", "image/webp"]);
 const maxFileBytes = 5 * 1024 * 1024;
 
+export function shouldRejectImageUploadInProduction(nodeEnv: string): boolean {
+  return nodeEnv === "production";
+}
+
 export interface ImageStorage {
   save(buffer: Buffer, alt: string): Promise<StoredImage>;
   delete(key: string): Promise<void>;
