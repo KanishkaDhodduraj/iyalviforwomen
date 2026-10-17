@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { Product } from "@/data/products";
 
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
+const apiUrl = apiBaseUrl ? `${apiBaseUrl}/api` : "/api";
 const apiErrorSchema = z.object({ error: z.string() }).passthrough();
 let csrfToken: string | null = null;
 let csrfRequest: Promise<string> | null = null;
@@ -118,7 +120,7 @@ async function fetchApi(input: RequestInfo | URL, init?: RequestInit): Promise<R
 async function getCsrfToken(): Promise<string> {
   if (csrfToken) return csrfToken;
   if (!csrfRequest) {
-    csrfRequest = fetchApi("/api/auth/csrf", { credentials: "include" })
+    csrfRequest = fetchApi(`${apiUrl}/auth/csrf`, { credentials: "include" })
       .then(readResponse<{ csrfToken: string }>)
       .then((result) => {
         csrfToken = result.csrfToken;
@@ -136,7 +138,7 @@ async function refreshSession(): Promise<boolean> {
     refreshRequest = (async () => {
       try {
         const token = await getCsrfToken();
-        const response = await fetchApi("/api/auth/refresh", {
+        const response = await fetchApi(`${apiUrl}/auth/refresh`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json", "x-csrf-token": token },
@@ -162,7 +164,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     headers.set("x-csrf-token", await getCsrfToken());
   }
 
-  const response = await fetchApi(`/api${path}`, {
+  const response = await fetchApi(`${apiUrl}${path}`, {
     ...init,
     method,
     headers,

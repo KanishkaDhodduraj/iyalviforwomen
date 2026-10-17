@@ -41,6 +41,7 @@ export const environmentSchema = z
     NODE_ENV: z
       .enum(["development", "test", "production"])
       .default("development"),
+    COOKIE_SAME_SITE: z.enum(["lax", "none"]).default("lax"),
     TRUST_PROXY: z
       .string()
       .trim()

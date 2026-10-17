@@ -33,7 +33,7 @@ app.use((request, response, next) => {
   if (!request.cookies?.admin_csrf) {
     response.cookie("admin_csrf", randomBytes(32).toString("hex"), {
       secure: env.NODE_ENV === "production",
-      sameSite: env.NODE_ENV === "production" ? "none" : "lax",
+      sameSite: env.COOKIE_SAME_SITE,
       httpOnly: false,
       path: "/",
     });

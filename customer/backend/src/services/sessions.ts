@@ -11,7 +11,7 @@ import { User } from "../models/User.js";
 const accessCookieOptions = {
   httpOnly: true,
   secure: env.NODE_ENV === "production",
-  sameSite: env.NODE_ENV === "production" ? ("none" as const) : ("lax" as const),
+  sameSite: env.COOKIE_SAME_SITE,
   path: "/",
 };
 
