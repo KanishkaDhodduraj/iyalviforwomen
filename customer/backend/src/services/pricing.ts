@@ -121,9 +121,12 @@ export async function calculateCartPrice(
     const coupon = await Coupon.findOne({
       code: couponCode.toUpperCase(),
       isActive: true,
-      expiresAt: { $gt: new Date() },
+      expiresAt: { $gt: now },
+      $and: [
+        { $or: [{ startsAt: { $lte: now } }, { startsAt: { $exists: false } }] },
+        { $or: [{ userRef: null }, { userRef: { $exists: false } }, { userRef: userId }] },
+      ],
       $expr: { $lt: ["$usedCount", "$usageLimit"] },
-      $or: [{ userRef: null }, { userRef: { $exists: false } }, { userRef: userId }],
     })
       .session(session ?? null)
       .exec();
@@ -185,13 +188,17 @@ export async function consumeCoupon(
   userId: string,
   session?: ClientSession,
 ): Promise<void> {
+  const now = new Date();
   const coupon = await Coupon.findOneAndUpdate(
     {
       code: couponCode,
       isActive: true,
-      expiresAt: { $gt: new Date() },
+      expiresAt: { $gt: now },
+      $and: [
+        { $or: [{ startsAt: { $lte: now } }, { startsAt: { $exists: false } }] },
+        { $or: [{ userRef: null }, { userRef: { $exists: false } }, { userRef: userId }] },
+      ],
       $expr: { $lt: ["$usedCount", "$usageLimit"] },
-      $or: [{ userRef: null }, { userRef: { $exists: false } }, { userRef: userId }],
     },
     { $inc: { usedCount: 1 } },
     { new: true, ...(session && { session }) },

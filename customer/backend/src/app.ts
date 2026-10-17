@@ -10,6 +10,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { env } from "./config/env.js";
+import "./config/db.js";
 import { authRouter } from "./routes/authRoutes.js";
 import { addressRouter } from "./routes/addressRoutes.js";
 import { adminOrderRouter, orderRouter } from "./routes/orderRoutes.js";

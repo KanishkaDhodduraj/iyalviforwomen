@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "lint": "eslint src",
+    "start": "node dist/src/index.js",
+    "lint": "eslint src api",
     "test": "vitest run",
     "create-admin": "tsx src/scripts/createAdmin.ts",
     "reset-admin": "tsx src/scripts/resetAdminCommand.ts"
@@ -27,7 +27,6 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.11.2",
     "multer": "^2.4.0",
-    "node-cron": "^4.6.0",
     "pdfkit": "^0.20.2",
     "sharp": "^0.35.5",
     "zod": "^4.6.7"

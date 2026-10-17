@@ -1,29 +1,19 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import {
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-  Activity, ArrowDownToLine, ArrowLeft, Boxes, CircleDollarSign, ClipboardList,
-  Eye, EyeOff, FileText, ImagePlus, Mail, MessageCircle, PackageCheck, Plus,
-  ShoppingBag, TicketPercent, UsersRound,
-=======
   Activity, ArrowDownToLine, ArrowLeft, Boxes, CircleDollarSign,
-  FileText, ImagePlus, PackageCheck, Plus, ShoppingBag, TicketPercent, UsersRound,
->>>>>>> Stashed changes
-=======
-  Activity, ArrowDownToLine, ArrowLeft, Boxes, CircleDollarSign,
-  FileText, ImagePlus, PackageCheck, Plus, ShoppingBag, TicketPercent, UsersRound,
->>>>>>> Stashed changes
+  FileText, ImagePlus, Mail, MessageCircle, PackageCheck, Plus, ShoppingBag,
+  TicketPercent, UsersRound,
 } from "lucide-react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
   Tooltip, XAxis, YAxis,
 } from "recharts";
-import { adminApi, authApi, signedInThisSessionKey, type PageResult } from "../api";
+import { adminApi, type PageResult } from "../api";
 import { useAdmin } from "../auth";
 import {
   ConfirmAction, DataTable, EmptyState, ErrorState, formatValue, PageHeader, Pagination,
@@ -839,156 +829,6 @@ export function ReportsPage() {
     </div>
   </>;
 }
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-
-export function SettingsPage() {
-  const [tab, setTab] = useState<"profile" | "security" | "store">("profile");
-  const profileQuery = useQuery({ queryKey: ["admin", "settings", "profile"], queryFn: () => adminApi.get<{ profile: AdminProfile }>("/settings/profile") });
-  const storeQuery = useQuery({ queryKey: ["admin", "settings", "store"], queryFn: () => adminApi.get<{ store: StoreSettings }>("/settings/store") });
-  const [profileNameOverride, setProfileNameOverride] = useState<string | null>(null);
-  const [profileError, setProfileError] = useState("");
-  const [storeOverride, setStoreOverride] = useState<StoreSettings | null>(null);
-  const profileName = profileNameOverride ?? profileQuery.data?.profile.name ?? "";
-  const store = storeOverride ?? storeQuery.data?.store ?? defaultStoreSettings;
-  const [storeError, setStoreError] = useState("");
-  const [passwordVisible, setPasswordVisible] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [passwordError, setPasswordError] = useState("");
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-  const toast = useToast();
-  const admin = useAdmin().data;
-  const canEditStore = admin?.role === "superadmin" || admin?.role === "manager";
-  async function saveProfile(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setProfileError("");
-    const parsed = profileSchema.safeParse({ name: profileName });
-    if (!parsed.success) {
-      setProfileError(parsed.error.issues[0]?.message ?? "Enter a valid name.");
-      return;
-    }
-    try {
-      await adminApi.patch("/settings/profile", parsed.data);
-      toast("Profile updated.");
-      await queryClient.invalidateQueries({ queryKey: ["admin", "settings", "profile"] });
-    } catch (error) {
-      setProfileError(error instanceof Error ? error.message : "Profile could not be updated.");
-    }
-  }
-
-  async function saveStore(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setStoreError("");
-    const parsed = storeSettingsSchema.safeParse(store);
-    if (!parsed.success) {
-      setStoreError(parsed.error.issues[0]?.message ?? "Review the store settings.");
-      return;
-    }
-    try {
-      const result = await adminApi.patch<{ store: StoreSettings }>("/settings/store", parsed.data);
-      setStoreOverride(result.store);
-      toast("Store settings saved.");
-      await queryClient.invalidateQueries({ queryKey: ["admin", "settings", "store"] });
-    } catch (error) {
-      setStoreError(error instanceof Error ? error.message : "Store settings could not be saved.");
-    }
-  }
-
-  async function savePassword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setPasswordError("");
-    const parsed = passwordChangeSchema.safeParse({ currentPassword, newPassword });
-    if (!parsed.success) {
-      setPasswordError(parsed.error.issues[0]?.message ?? "Review the password requirements.");
-      return;
-    }
-    try {
-      await authApi.changePassword(parsed.data.currentPassword, parsed.data.newPassword);
-      setCurrentPassword("");
-      setNewPassword("");
-      toast("Password updated. Your current session remains active.");
-    } catch (error) {
-      setPasswordError(error instanceof Error ? error.message : "Password could not be changed.");
-    }
-  }
-
-  async function signOutEverywhere() {
-    await authApi.logoutAll();
-    sessionStorage.removeItem(signedInThisSessionKey);
-    queryClient.clear();
-    await navigate("/login", { replace: true });
-  }
-
-  const loading = profileQuery.isLoading || storeQuery.isLoading;
-  const queryError = profileQuery.error ?? storeQuery.error;
-  return <>
-    <PageHeader eyebrow="ADMINISTRATION" title="Settings" description="Manage your administrator profile, security, and store preferences." />
-    <div className="settings-tabs" role="tablist" aria-label="Settings sections">
-      {(["profile", "security", "store"] as const).map((value) => <button
-        key={value}
-        type="button"
-        role="tab"
-        aria-selected={tab === value}
-        className={tab === value ? "primary-button" : "secondary-button"}
-        onClick={() => setTab(value)}
-      >{value[0]!.toUpperCase() + value.slice(1)}</button>)}
-    </div>
-    {loading ? <section className="panel"><SkeletonRows count={5} /></section>
-      : queryError ? <ErrorState error={queryError} retry={() => { void profileQuery.refetch(); void storeQuery.refetch(); }} />
-        : tab === "profile" ? <section className="panel settings-panel">
-          <h2>Administrator profile</h2><p>Your email address is read-only. Update the name shown for your account.</p>
-          <form onSubmit={(event) => void saveProfile(event)}>
-            <div className="form-grid">
-              <label>Name<input aria-label="Administrator name" value={profileName} onChange={(event) => setProfileNameOverride(event.target.value)} maxLength={100} required /></label>
-              <label>Email address<input aria-label="Profile email address" value={profileQuery.data?.profile.email ?? ""} readOnly /></label>
-            </div>
-            {profileError && <p className="field-error" role="alert">{profileError}</p>}
-            <div className="form-footer"><button className="primary-button">Save profile</button></div>
-          </form>
-        </section>
-          : tab === "security" ? <div className="settings-stack">
-            <section className="panel settings-panel">
-              <h2>Change password</h2><p>Choose a password with at least 10 characters, including a letter and a number.</p>
-              <form onSubmit={(event) => void savePassword(event)}>
-                <div className="form-grid">
-                  <label>Current password<input aria-label="Current password" type={passwordVisible ? "text" : "password"} autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /></label>
-                  <label>New password<input aria-label="New password" type={passwordVisible ? "text" : "password"} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required />
-                    <small className="muted-copy">Strength: {passwordStrength(newPassword)}</small>
-                  </label>
-                </div>
-                <div className="settings-actions">
-                  <button type="button" className="secondary-button" onClick={() => setPasswordVisible((value) => !value)}>{passwordVisible ? <EyeOff size={15} /> : <Eye size={15} />}{passwordVisible ? "Hide passwords" : "Show passwords"}</button>
-                  <button className="primary-button">Update password</button>
-                </div>
-                {passwordError && <p className="field-error" role="alert">{passwordError}</p>}
-              </form>
-            </section>
-            <section className="panel settings-panel">
-              <h2>Active devices</h2><p>Sign out from every device with an active administrator session.</p>
-              <ConfirmAction label="Sign out of all devices" title="Sign out of all devices?" description="All refresh sessions for this administrator will be revoked, including this browser session." destructive onConfirm={signOutEverywhere} />
-            </section>
-          </div>
-            : <section className="panel settings-panel">
-              <h2>Store preferences</h2><p>These settings are shared with the customer storefront.</p>
-              {!canEditStore && <p className="muted-copy">You can view these values, but only a manager or superadmin can edit them.</p>}
-              <form onSubmit={(event) => void saveStore(event)}>
-                <div className="form-grid">
-                  <label>Store name<input value={store.storeName} disabled={!canEditStore} onChange={(event) => setStoreOverride({ ...store, storeName: event.target.value })} required maxLength={100} /></label>
-                  <label>Support email<input type="email" value={store.supportEmail} disabled={!canEditStore} onChange={(event) => setStoreOverride({ ...store, supportEmail: event.target.value })} /></label>
-                  <label>Support phone<input type="tel" value={store.supportPhone} disabled={!canEditStore} onChange={(event) => setStoreOverride({ ...store, supportPhone: event.target.value })} maxLength={40} /></label>
-                  <label>WhatsApp number<input type="tel" value={store.whatsappNumber} disabled={!canEditStore} onChange={(event) => setStoreOverride({ ...store, whatsappNumber: event.target.value })} maxLength={40} /></label>
-                  <label>Free shipping threshold<input type="number" min="0" max="1000000" value={store.freeShippingThreshold} disabled={!canEditStore} onChange={(event) => setStoreOverride({ ...store, freeShippingThreshold: Number(event.target.value) })} /></label>
-                  <label>Low stock threshold<input type="number" min="0" step="1" max="1000000" value={store.lowStockThreshold} disabled={!canEditStore} onChange={(event) => setStoreOverride({ ...store, lowStockThreshold: Number(event.target.value) })} /></label>
-                  <label>Currency (ISO code)<input value={store.currency} disabled={!canEditStore} onChange={(event) => setStoreOverride({ ...store, currency: event.target.value.toUpperCase() })} minLength={3} maxLength={3} /></label>
-                </div>
-                {storeError && <p className="field-error" role="alert">{storeError}</p>}
-                {canEditStore && <div className="form-footer"><button className="primary-button">Save store settings</button></div>}
-              </form>
-            </section>}
-  </>;
-}
 
 type MessageStatus = "new" | "read" | "resolved";
 type ContactMessage = {
@@ -1003,49 +843,7 @@ type ContactMessage = {
   adminNote?: string;
   createdAt: string;
 };
-type AdminProfile = { name: string; email: string };
-type StoreSettings = {
-  storeName: string;
-  supportEmail: string;
-  supportPhone: string;
-  whatsappNumber: string;
-  freeShippingThreshold: number;
-  lowStockThreshold: number;
-  currency: string;
-};
-const defaultStoreSettings: StoreSettings = {
-  storeName: "Iyalvi",
-  supportEmail: "",
-  supportPhone: "",
-  whatsappNumber: "",
-  freeShippingThreshold: 999,
-  lowStockThreshold: 5,
-  currency: "INR",
-};
-const profileSchema = z.object({ name: z.string().trim().min(1).max(100) }).strict();
-const storeSettingsSchema = z.object({
-  storeName: z.string().trim().min(1).max(100),
-  supportEmail: z.string().trim().max(254).refine((email) => email === "" || z.string().email().max(254).safeParse(email).success),
-  supportPhone: z.string().trim().max(40).regex(/^[+\d\s().-]*$/),
-  whatsappNumber: z.string().trim().max(40).regex(/^[+\d\s().-]*$/),
-  freeShippingThreshold: z.number().finite().min(0).max(1_000_000),
-  lowStockThreshold: z.number().int().min(0).max(1_000_000),
-  currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/),
-}).strict();
-const passwordChangeSchema = z.object({
-  currentPassword: z.string().min(1).max(200),
-  newPassword: z.string().min(10).max(200).regex(/[A-Za-z]/, "Password must contain a letter").regex(/[0-9]/, "Password must contain a number"),
-}).strict().refine((value) => value.currentPassword !== value.newPassword, { path: ["newPassword"], message: "New password must differ from the current password" });
 
 function messageStatus(message: ContactMessage): MessageStatus {
   return message.status ?? (message.isResolved ? "resolved" : message.isRead ? "read" : "new");
 }
-
-function passwordStrength(value: string): string {
-  const score = [value.length >= 10, /[A-Za-z]/.test(value), /\d/.test(value), /[^A-Za-z0-9]/.test(value)].filter(Boolean).length;
-  return ["Not entered", "Weak", "Fair", "Good", "Strong"][score]!;
-}
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes

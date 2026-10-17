@@ -11,15 +11,8 @@ import { Discount } from "./models/Discount.js";
 import { Order } from "./models/Order.js";
 import { User } from "./models/User.js";
 import { ContactMessage } from "./models/ContactMessage.js";
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
 import { Setting } from "./models/Setting.js";
-=======
 import { Reel } from "./models/Reel.js";
->>>>>>> Stashed changes
-=======
-import { Reel } from "./models/Reel.js";
->>>>>>> Stashed changes
 
 async function getCsrfCredentials() {
   const response = await request(app).get("/api/auth/csrf");

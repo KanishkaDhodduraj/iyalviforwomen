@@ -202,16 +202,9 @@
   .metric-grid { grid-template-columns: 1fr; }
   .sidebar { width: min(280px, 88vw); }
   .modal-card { padding: 18px; }
-<<<<<<< Updated upstream
 }
 .nav-count { margin-left: auto; border-radius: 99px; background: var(--maroon); padding: 2px 6px; color: #fff; font-size: 9px; font-weight: 700; }
-.settings-tabs, .settings-actions, .message-actions, .message-filters { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-.settings-tabs { margin: 0 0 14px; }
-.settings-stack { display: grid; gap: 14px; }
-.settings-panel > h2 { margin: 0; font-family: Georgia, serif; font-size: 20px; font-weight: 550; }
-.settings-panel > p { color: var(--muted); font-size: 12px; line-height: 1.6; }
-.settings-panel form { margin-top: 14px; }
-.settings-actions { justify-content: flex-end; }
+.message-actions, .message-filters { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .message-toolbar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 12px; }
 .message-toolbar > label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
 .message-filters { margin-bottom: 12px; }
@@ -240,6 +233,4 @@
 @media (max-width: 900px) {
   .message-workspace { grid-template-columns: 1fr; }
   .message-list { max-height: 430px; overflow-y: auto; }
-=======
->>>>>>> Stashed changes
 }

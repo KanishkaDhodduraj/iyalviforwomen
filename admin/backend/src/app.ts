@@ -9,6 +9,7 @@ import { randomBytes } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { env } from "./config/env.js";
+import "./config/db.js";
 import { requireAdmin } from "./middleware/auth.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
 import { mongoSanitizeExpress5 } from "./middleware/mongoSanitize.js";
@@ -17,6 +18,8 @@ import { adminRouter } from "./routes/admin.js";
 import { authRouter } from "./routes/auth.js";
 import { productImageRouter } from "./routes/productImageRoutes.js";
 import { reportsRouter } from "./routes/reports.js";
+import { sweepExpiredPromotions } from "./services/promotionExpiry.js";
+import { hasValidCronAuthorization } from "./services/cronAuthorization.js";
 
 export const app = express();
 const uploadDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "../../../uploads");
@@ -68,6 +71,15 @@ app.use(
 app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: true, legacyHeaders: false }));
 app.get("/api/health", emptyQuery, emptyBody, (_request, response) => {
   response.json({ status: "ok" });
+});
+app.get("/api/cron/expire-promotions", emptyQuery, emptyBody, async (request, response) => {
+  if (!hasValidCronAuthorization(request.get("authorization"), env.CRON_SECRET)) {
+    response.status(env.CRON_SECRET ? 401 : 503).json({
+      error: env.CRON_SECRET ? "Unauthorized" : "Cron is not configured",
+    });
+    return;
+  }
+  response.json(await sweepExpiredPromotions());
 });
 app.use("/api/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false }));
 app.use("/api/auth", authRouter);

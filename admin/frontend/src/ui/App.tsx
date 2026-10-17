@@ -10,13 +10,6 @@ import { authKey, LoginPage, ProtectedRoute, useAdmin } from "../auth";
 import {
   AuditPage, CustomerDetailPage, CustomersPage, DashboardPage, DiscountsPage, MessagesPage,
   OrderDetailPage, OrdersPage, PaymentsPage, ProductEditorPage, ProductsPage, ReportsPage,
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-  SettingsPage,
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
 } from "./pages";
 import { ReelsPage, ReviewsPage } from "./content-management";
 import { ToastProvider } from "./shared";
@@ -37,13 +30,6 @@ const navigation = [
   { label: "Reports", to: "/reports", icon: ChartNoAxesCombined, roles: ["superadmin", "manager"] },
   { label: "Messages", to: "/messages", icon: ContactRound, roles: ["superadmin", "manager", "support"] },
   { label: "Audit log", to: "/audit", icon: Activity, roles: ["superadmin"] },
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-  { label: "Settings", to: "/settings", icon: Settings, roles: ["superadmin", "manager", "support"] },
-=======
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
 ];
 
 function AdminLayout() {
@@ -126,18 +112,8 @@ export function AdminRoutes() {
         <Route path="messages" element={<MessagesPage />} />
         <Route path="audit" element={<RequiresRole roles={["superadmin"]}><AuditPage /></RequiresRole>} />
         <Route path="reports" element={<RequiresRole roles={["superadmin", "manager"]}><ReportsPage /></RequiresRole>} />
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
         <Route path="staff" element={<Navigate to="/dashboard" replace />} />
-        <Route path="settings" element={<SettingsPage />} />
-=======
-        <Route path="staff" element={<Navigate to="/" replace />} />
-        <Route path="settings" element={<Navigate to="/" replace />} />
->>>>>>> Stashed changes
-=======
-        <Route path="staff" element={<Navigate to="/" replace />} />
-        <Route path="settings" element={<Navigate to="/" replace />} />
->>>>>>> Stashed changes
+        <Route path="settings" element={<Navigate to="/dashboard" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Route>

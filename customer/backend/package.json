@@ -5,17 +5,13 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "lint": "eslint src",
+    "start": "node dist/src/index.js",
+    "lint": "eslint src api",
     "test": "vitest run",
     "env:check": "tsx src/scripts/envCheck.ts",
     "seed": "tsx src/scripts/seed.ts",
     "clear:products": "tsx src/scripts/clearProducts.ts",
     "clear-products": "tsx src/scripts/clearProducts.ts",
-    "db:indexes": "tsx src/scripts/createIndexes.ts",
-    "lint": "eslint src",
-    "test": "vitest run",
-    "seed": "tsx src/scripts/seed.ts",
     "db:indexes": "tsx src/scripts/createIndexes.ts"
   },
   "dependencies": {

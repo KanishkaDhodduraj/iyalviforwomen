@@ -33,18 +33,9 @@ import { deleteImageAssetsWhenUnused } from "../services/imageStorage.js";
 import { generateUniqueCouponCodes } from "../services/couponCodes.js";
 import { productSlugBase } from "../services/productSlug.js";
 import { previewDiscounts, serializeDiscount, type ManagedDiscount } from "../services/discountManagement.js";
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
 import { messagesRouter } from "./messages.js";
-import { settingsRouter } from "./settings.js";
-=======
 import { reelsRouter } from "./reels.js";
 import { reviewsRouter } from "./reviews.js";
->>>>>>> Stashed changes
-=======
-import { reelsRouter } from "./reels.js";
-import { reviewsRouter } from "./reviews.js";
->>>>>>> Stashed changes
 
 export const adminRouter = Router();
 const idSchema = z.string().regex(/^[a-f\d]{24}$/i);
@@ -102,12 +93,13 @@ const customerListQuery = pageSchema.extend({
 }).strict();
 const blockBody = z.object({ isBlocked: z.boolean() }).strict();
 
-function couponStatus(coupon: { isActive: boolean; expiresAt: Date | string }, now = new Date()) {
+function couponStatus(coupon: { isActive: boolean; startsAt?: Date | string; expiresAt: Date | string }, now = new Date()) {
   if (new Date(coupon.expiresAt).getTime() <= now.getTime()) return "expired" as const;
+  if (coupon.startsAt && new Date(coupon.startsAt).getTime() > now.getTime()) return "scheduled" as const;
   return coupon.isActive ? "active" as const : "inactive" as const;
 }
 
-function serializeCoupon<T extends { isActive: boolean; expiresAt: Date | string }>(coupon: T, now = new Date()) {
+function serializeCoupon<T extends { isActive: boolean; startsAt?: Date | string; expiresAt: Date | string }>(coupon: T, now = new Date()) {
   return { ...coupon, status: couponStatus(coupon, now) };
 }
 
@@ -186,20 +178,9 @@ const bulkProductBody = z.object({
 }).strict().refine((value) => (value.action === "category") === (value.category !== undefined), {
   message: "Category is required only for category changes",
 });
-<<<<<<< Updated upstream
-const paymentListQuery = pageSchema.extend({
-=======
-const messageListQuery = pageSchema.extend({
-  isRead: z.enum(["true", "false"]).optional(),
-  isResolved: z.enum(["true", "false"]).optional(),
-}).strict();
 const paymentListQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(25),
-<<<<<<< Updated upstream
->>>>>>> Stashed changes
-=======
->>>>>>> Stashed changes
   status: z.enum(["pending", "paid", "failed", "refunded"]).optional(),
   method: z.enum(["COD", "UPI", "CARD", "NETBANKING", "NET_BANKING", "RAZORPAY"]).optional(),
   from: z.coerce.date().optional(),
@@ -211,18 +192,9 @@ const paymentListQuery = z.object({
   }
 });
 adminRouter.use(requireAdmin);
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-adminRouter.use("/settings", settingsRouter);
 adminRouter.use("/messages", messagesRouter);
-=======
 adminRouter.use("/reels", reelsRouter);
 adminRouter.use("/reviews", reviewsRouter);
->>>>>>> Stashed changes
-=======
-adminRouter.use("/reels", reelsRouter);
-adminRouter.use("/reviews", reviewsRouter);
->>>>>>> Stashed changes
 
 adminRouter.get("/dashboard", emptyQuery, emptyBody, requireRole("superadmin", "manager"), async (_request, response) => {
   const now = new Date();

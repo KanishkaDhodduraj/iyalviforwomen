@@ -8,7 +8,6 @@ const mockState = vi.hoisted(() => ({
   role: "manager",
   adminFindById: vi.fn(),
   adminUpdateOne: vi.fn(),
-  settingFindOneAndUpdate: vi.fn(),
   auditCreate: vi.fn(),
 }));
 
@@ -25,9 +24,6 @@ vi.mock("../config/env.js", () => ({
 }));
 vi.mock("../models/AdminUser.js", () => ({
   AdminUser: { findById: mockState.adminFindById, updateOne: mockState.adminUpdateOne },
-}));
-vi.mock("../models/Setting.js", () => ({
-  Setting: { findOneAndUpdate: mockState.settingFindOneAndUpdate },
 }));
 vi.mock("../models/AuditLog.js", () => ({
   AuditLog: { create: mockState.auditCreate },
@@ -52,19 +48,6 @@ beforeAll(async () => {
     }),
   }));
   mockState.adminUpdateOne.mockReturnValue({ exec: async () => ({ matchedCount: 1 }) });
-  mockState.settingFindOneAndUpdate.mockReturnValue({
-    lean: () => ({
-      exec: async () => ({
-        storeName: "Iyalvi",
-        supportEmail: "",
-        supportPhone: "",
-        whatsappNumber: "",
-        freeShippingThreshold: 999,
-        lowStockThreshold: 5,
-        currency: "INR",
-      }),
-    }),
-  });
   mockState.auditCreate.mockResolvedValue(undefined);
   server = app.listen(0);
   await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -78,7 +61,13 @@ afterAll(async () => {
 });
 
 describe("admin API authentication", () => {
-  it.each(["/api/settings/profile", "/api/settings/store", "/api/messages", "/api/messages/unread-count"])(
+  it("does not expose promotion expiry without a configured cron secret", async () => {
+    const response = await fetch(`${origin}/api/cron/expire-promotions`);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "Cron is not configured" });
+  });
+
+  it.each(["/api/messages", "/api/messages/unread-count"])(
     "returns 401 for unauthenticated GET %s requests",
     async (path) => {
       const response = await fetch(`${origin}${path}`);
@@ -86,31 +75,13 @@ describe("admin API authentication", () => {
     },
   );
 
-  it("denies store edits to support admins and allows managers", async () => {
+  it("does not expose the removed settings API to authenticated admins", async () => {
     const refresh = "current-session-refresh-token";
     const access = jwt.sign({ kind: "access" }, secret, { subject: "admin-id", expiresIn: "5m" });
     const headers = {
-      "Content-Type": "application/json",
       Cookie: `admin_access=${access}; admin_refresh=${refresh}; admin_csrf=csrf-token`,
-      "x-csrf-token": "csrf-token",
     };
-    const body = JSON.stringify({
-      storeName: "Iyalvi",
-      supportEmail: "",
-      supportPhone: "",
-      whatsappNumber: "",
-      freeShippingThreshold: 1200,
-      lowStockThreshold: 5,
-      currency: "INR",
-    });
-
-    mockState.role = "support";
-    const denied = await fetch(`${origin}/api/settings/store`, { method: "PATCH", headers, body });
-    expect(denied.status).toBe(403);
-
-    mockState.role = "manager";
-    const allowed = await fetch(`${origin}/api/settings/store`, { method: "PATCH", headers, body });
-    expect(allowed.status).toBe(200);
-    expect(mockState.settingFindOneAndUpdate).toHaveBeenCalledOnce();
+    const response = await fetch(`${origin}/api/settings/store`, { headers });
+    expect(response.status).toBe(404);
   });
 });

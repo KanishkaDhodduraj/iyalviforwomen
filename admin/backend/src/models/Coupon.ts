@@ -7,6 +7,7 @@ const couponSchema = new Schema(
     value: { type: Number, required: true, min: 0 },
     minOrder: { type: Number, required: true, min: 0, default: 0 },
     maxDiscount: { type: Number, min: 0 },
+    startsAt: { type: Date, default: new Date(0) },
     expiresAt: { type: Date, required: true },
     usageLimit: { type: Number, required: true, min: 1 },
     usedCount: { type: Number, required: true, min: 0, default: 0 },
@@ -23,6 +24,6 @@ couponSchema.pre("validate", function validateCoupon() {
   }
 });
 
-couponSchema.index({ expiresAt: 1, isActive: 1 });
+couponSchema.index({ startsAt: 1, expiresAt: 1, isActive: 1 });
 
 export const Coupon = model("Coupon", couponSchema);
