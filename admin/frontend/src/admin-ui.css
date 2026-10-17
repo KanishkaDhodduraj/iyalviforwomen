@@ -202,6 +202,7 @@
   .metric-grid { grid-template-columns: 1fr; }
   .sidebar { width: min(280px, 88vw); }
   .modal-card { padding: 18px; }
+<<<<<<< Updated upstream
 }
 .nav-count { margin-left: auto; border-radius: 99px; background: var(--maroon); padding: 2px 6px; color: #fff; font-size: 9px; font-weight: 700; }
 .settings-tabs, .settings-actions, .message-actions, .message-filters { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
@@ -239,4 +240,6 @@
 @media (max-width: 900px) {
   .message-workspace { grid-template-columns: 1fr; }
   .message-list { max-height: 430px; overflow-y: auto; }
+=======
+>>>>>>> Stashed changes
 }

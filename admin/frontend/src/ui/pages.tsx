@@ -6,9 +6,14 @@ import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import {
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   Activity, ArrowDownToLine, ArrowLeft, Boxes, CircleDollarSign, ClipboardList,
   Eye, EyeOff, FileText, ImagePlus, Mail, MessageCircle, PackageCheck, Plus,
   ShoppingBag, TicketPercent, UsersRound,
+=======
+  Activity, ArrowDownToLine, ArrowLeft, Boxes, CircleDollarSign,
+  FileText, ImagePlus, PackageCheck, Plus, ShoppingBag, TicketPercent, UsersRound,
+>>>>>>> Stashed changes
 =======
   Activity, ArrowDownToLine, ArrowLeft, Boxes, CircleDollarSign,
   FileText, ImagePlus, PackageCheck, Plus, ShoppingBag, TicketPercent, UsersRound,
@@ -835,6 +840,7 @@ export function ReportsPage() {
   </>;
 }
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 
 export function SettingsPage() {
   const [tab, setTab] = useState<"profile" | "security" | "store">("profile");
@@ -1039,5 +1045,7 @@ function passwordStrength(value: string): string {
   const score = [value.length >= 10, /[A-Za-z]/.test(value), /\d/.test(value), /[^A-Za-z0-9]/.test(value)].filter(Boolean).length;
   return ["Not entered", "Weak", "Fair", "Good", "Strong"][score]!;
 }
+=======
+>>>>>>> Stashed changes
 =======
 >>>>>>> Stashed changes

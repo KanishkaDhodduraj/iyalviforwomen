@@ -34,8 +34,13 @@ import { generateUniqueCouponCodes } from "../services/couponCodes.js";
 import { productSlugBase } from "../services/productSlug.js";
 import { previewDiscounts, serializeDiscount, type ManagedDiscount } from "../services/discountManagement.js";
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 import { messagesRouter } from "./messages.js";
 import { settingsRouter } from "./settings.js";
+=======
+import { reelsRouter } from "./reels.js";
+import { reviewsRouter } from "./reviews.js";
+>>>>>>> Stashed changes
 =======
 import { reelsRouter } from "./reels.js";
 import { reviewsRouter } from "./reviews.js";
@@ -191,6 +196,9 @@ const messageListQuery = pageSchema.extend({
 const paymentListQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(25),
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
   status: z.enum(["pending", "paid", "failed", "refunded"]).optional(),
   method: z.enum(["COD", "UPI", "CARD", "NETBANKING", "NET_BANKING", "RAZORPAY"]).optional(),
@@ -204,8 +212,13 @@ const paymentListQuery = z.object({
 });
 adminRouter.use(requireAdmin);
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 adminRouter.use("/settings", settingsRouter);
 adminRouter.use("/messages", messagesRouter);
+=======
+adminRouter.use("/reels", reelsRouter);
+adminRouter.use("/reviews", reviewsRouter);
+>>>>>>> Stashed changes
 =======
 adminRouter.use("/reels", reelsRouter);
 adminRouter.use("/reviews", reviewsRouter);

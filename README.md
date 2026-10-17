@@ -36,6 +36,7 @@ npm run dev:admin:frontend
 ```
 
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 The admin API listens on `http://localhost:5001`. Configure `admin/backend/.env` from
 `admin/backend/.env.example` with the same `DATABASE_URL` used by the shop and a separate,
 random `ADMIN_JWT_SECRET` of at least 32 characters. Set `ADMIN_CLIENT_URL` to
@@ -51,10 +52,15 @@ Administrator cookies are browser-session cookies. The server maintains an eight
 refresh-token inactivity window. Administrators can update their profile and password, manage
 store settings, and review customer contact messages from the admin workspace.
 =======
+=======
+>>>>>>> Stashed changes
 The admin API listens on `http://localhost:5001`. Configure its local environment with
 `DATABASE_URL`, `ADMIN_JWT_SECRET`, and `ADMIN_CLIENT_URL`. Bootstrap the first superadmin by
 supplying `ADMIN_EMAIL` and `ADMIN_PASSWORD` to `npm --prefix admin/backend run create-admin`.
 There is no public admin registration; sign in with a provisioned administrator account.
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
 
 The admin frontend has its own `admin/frontend/.env.example`. Credentials and sessions are

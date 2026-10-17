@@ -11,7 +11,10 @@ import {
   AuditPage, CustomerDetailPage, CustomersPage, DashboardPage, DiscountsPage, MessagesPage,
   OrderDetailPage, OrdersPage, PaymentsPage, ProductEditorPage, ProductsPage, ReportsPage,
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   SettingsPage,
+=======
+>>>>>>> Stashed changes
 =======
 >>>>>>> Stashed changes
 } from "./pages";
@@ -35,7 +38,10 @@ const navigation = [
   { label: "Messages", to: "/messages", icon: ContactRound, roles: ["superadmin", "manager", "support"] },
   { label: "Audit log", to: "/audit", icon: Activity, roles: ["superadmin"] },
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   { label: "Settings", to: "/settings", icon: Settings, roles: ["superadmin", "manager", "support"] },
+=======
+>>>>>>> Stashed changes
 =======
 >>>>>>> Stashed changes
 ];
@@ -121,8 +127,13 @@ export function AdminRoutes() {
         <Route path="audit" element={<RequiresRole roles={["superadmin"]}><AuditPage /></RequiresRole>} />
         <Route path="reports" element={<RequiresRole roles={["superadmin", "manager"]}><ReportsPage /></RequiresRole>} />
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
         <Route path="staff" element={<Navigate to="/dashboard" replace />} />
         <Route path="settings" element={<SettingsPage />} />
+=======
+        <Route path="staff" element={<Navigate to="/" replace />} />
+        <Route path="settings" element={<Navigate to="/" replace />} />
+>>>>>>> Stashed changes
 =======
         <Route path="staff" element={<Navigate to="/" replace />} />
         <Route path="settings" element={<Navigate to="/" replace />} />
