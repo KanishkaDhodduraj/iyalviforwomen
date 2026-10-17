@@ -3,10 +3,15 @@ import type { Product } from "@/data/products";
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
 const apiUrl = apiBaseUrl ? `${apiBaseUrl}/api` : "/api";
-const apiErrorSchema = z.object({ error: z.string() }).passthrough();
+const apiErrorSchema = z
+  .object({ error: z.string().optional(), message: z.string().optional() })
+  .passthrough();
 let csrfToken: string | null = null;
 let csrfRequest: Promise<string> | null = null;
 let refreshRequest: Promise<boolean> | null = null;
+const publicReadCache = new Map<string, { expiresAt: number; value: unknown }>();
+const publicReadRequests = new Map<string, Promise<unknown>>();
+const PUBLIC_READ_CACHE_TTL = 60_000;
 
 export class ApiError extends Error {
   constructor(
@@ -43,12 +48,14 @@ export interface ApiProduct {
   _id: string;
   slug: string;
   name: string;
-  category: "saree" | "kurti";
+  category?: "saree" | "kurti";
   subCategory: string;
   fabric: string;
-  occasion: string;
   colors: string[];
-  sizes: Array<string | { size: string; stock: number }>;
+  sizes: string[];
+  sizeStock: Record<string, { inStock: boolean; lowStock: number | null }>;
+  inStock: boolean;
+  lowStock: number | null;
   price: number;
   mrp: number;
   originalPrice?: number;
@@ -62,7 +69,6 @@ export interface ApiProduct {
         thumbnailUrl?: string;
       }
   >;
-  stock: number;
   isActive: boolean;
   craft?: string;
   craftOrigin?: string;
@@ -75,9 +81,22 @@ export interface ApiOrder {
   discount: number;
   shipping: number;
   total: number;
-  paymentMethod: "COD" | "UPI" | "CARD" | "NET_BANKING" | "RAZORPAY";
+  paymentMethod: "COD" | "UPI" | "CARD" | "NETBANKING" | "RAZORPAY";
   paymentStatus: "pending" | "paid" | "failed" | "refunded";
-  orderStatus: "placed" | "packed" | "shipped" | "delivered" | "cancelled";
+  orderStatus: "placed" | "packed" | "shipped" | "out_for_delivery" | "delivered" | "cancelled";
+  createdAt: string;
+  courier?: string;
+  trackingNumber?: string;
+  statusHistory?: Array<{ status: ApiOrder["orderStatus"]; at: string; note?: string }>;
+}
+
+export interface ApiReel {
+  _id: string;
+  title: string;
+  shortcode: string;
+  instagramUrl: string;
+  order: number;
+  isActive: boolean;
   createdAt: string;
 }
 
@@ -91,9 +110,12 @@ async function readResponse<T>(response: Response): Promise<T> {
   const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const parsed = apiErrorSchema.safeParse(payload);
+    if (response.status === 429) {
+      throw new ApiError("Too many requests, please wait a moment", response.status);
+    }
     throw new ApiError(
       parsed.success
-        ? parsed.data.error
+        ? (parsed.data.message ?? parsed.data.error ?? "Something went wrong. Please try again.")
         : response.status === 502 || response.status === 503 || response.status === 504
           ? "The backend service is unavailable. Start or check the backend server, then try again."
           : "Something went wrong. Please try again.",
@@ -155,7 +177,12 @@ async function refreshSession(): Promise<boolean> {
   return refreshRequest;
 }
 
-export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+function isCacheablePublicRead(path: string, method: string): boolean {
+  if (method !== "GET") return false;
+  return /^\/(?:products(?:\/[^/?]+)?|discounts|reels)(?:\?|$|\/)/.test(path);
+}
+
+async function performApiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { body, retryAuth = true, headers: inputHeaders, ...init } = options;
   const method = (init.method ?? "GET").toUpperCase();
   const headers = new Headers(inputHeaders);
@@ -184,6 +211,29 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   return readResponse<T>(response);
 }
 
+export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const method = (options.method ?? "GET").toUpperCase();
+  if (options.retryAuth === false || !isCacheablePublicRead(path, method)) {
+    return performApiRequest<T>(path, options);
+  }
+
+  const cached = publicReadCache.get(path);
+  if (cached && cached.expiresAt > Date.now()) return cached.value as T;
+  if (cached) publicReadCache.delete(path);
+
+  const pending = publicReadRequests.get(path);
+  if (pending) return pending as Promise<T>;
+
+  const request = performApiRequest<T>(path, options)
+    .then((value) => {
+      publicReadCache.set(path, { expiresAt: Date.now() + PUBLIC_READ_CACHE_TTL, value });
+      return value;
+    })
+    .finally(() => publicReadRequests.delete(path));
+  publicReadRequests.set(path, request);
+  return request;
+}
+
 export const api = {
   get: <T>(path: string) => apiRequest<T>(path),
   post: <T>(path: string, body: unknown, headers?: HeadersInit) =>
@@ -193,12 +243,17 @@ export const api = {
   clearCsrf: () => {
     csrfToken = null;
   },
+  clearPublicReadCache: () => {
+    publicReadCache.clear();
+    publicReadRequests.clear();
+  },
 };
 
 export async function getAllProducts(
   query: URLSearchParams = new URLSearchParams(),
 ): Promise<ApiProduct[]> {
   const params = new URLSearchParams(query);
+  if (!params.has("sort")) params.set("sort", "newest");
   params.set("page", "1");
   params.set("limit", "50");
   const firstPage = await api.get<{
@@ -216,21 +271,23 @@ export async function getAllProducts(
 }
 
 export function productFromApi(product: ApiProduct): Product {
-  const category: Product["category"] = product.category === "saree" ? "Sarees" : "Kurtis";
+  const category: Product["category"] = product.category === "kurti" ? "Kurtis" : "Sarees";
   const images = product.images.map((image) => (typeof image === "string" ? image : image.url));
-  const sizes = product.sizes.map((size) => (typeof size === "string" ? size : size.size));
+  const sizes = product.sizes;
   return {
     id: product._id,
+    slug: product.slug,
     name: product.name,
     fabric: product.fabric,
     price: product.price,
-    occasion: product.occasion as Product["occasion"],
     colors: [...product.colors],
     craftOrigin: product.craftOrigin ?? "",
     sizes,
+    sizeStock: product.sizeStock,
+    inStock: product.inStock,
+    lowStock: product.lowStock,
     image: images[0] ?? "",
     images,
-    unsplashImage: images[0] ?? "",
     craft: product.craft ?? product.subCategory,
     category,
     subcategory: product.subCategory as Product["subcategory"],
@@ -245,10 +302,7 @@ export function apiProductForCartItem(
   productId: string,
   catalog: ApiProduct[],
 ): ApiProduct | undefined {
-  return (
-    catalog.find((product) => product._id === productId) ??
-    catalog.find((product) => product.slug.startsWith(`${productId}-`))
-  );
+  return catalog.find((product) => product._id === productId);
 }
 
 export function productIdToApiSlug(id: string, products: ApiProduct[]): string | undefined {

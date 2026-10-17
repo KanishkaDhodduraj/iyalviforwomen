@@ -1,4 +1,3 @@
-import { schedule } from "node-cron";
 import { AuditLog } from "../models/AuditLog.js";
 import { Coupon } from "../models/Coupon.js";
 import { Discount } from "../models/Discount.js";
@@ -68,13 +67,4 @@ const databaseStore: ExpiryStore = {
       createdAt: now,
     });
   },
-};
-
-export function startPromotionExpiryScheduler() {
-  return schedule("* * * * *", () => {
-    void sweepExpiredPromotions().catch((error: unknown) => {
-      const errorType = error instanceof Error ? error.name : "UnknownError";
-      console.error(`Promotion expiry sweep failed (${errorType})`);
-    });
-  }, { timezone: "UTC", noOverlap: true });
 }

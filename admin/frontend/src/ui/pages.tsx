@@ -1,12 +1,13 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm, useWatch } from "react-hook-form";
+import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 import {
-  Activity, ArrowDownToLine, ArrowLeft, Boxes, CircleDollarSign, ClipboardList,
-  FileText, ImagePlus, PackageCheck, Plus, RefreshCw, ShoppingBag, TicketPercent, UsersRound,
+  Activity, ArrowDownToLine, ArrowLeft, Boxes, CircleDollarSign,
+  FileText, ImagePlus, Mail, MessageCircle, PackageCheck, Plus, ShoppingBag,
+  TicketPercent, UsersRound,
 } from "lucide-react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer,
@@ -119,7 +120,7 @@ export function OrdersPage() {
     { key: "total", label: "Total", render: (row: Row) => money(row.total) },
     { key: "createdAt", label: "Placed" },
   ];
-  return <ListingPage title="Orders" subtitle="Track fulfilment, review payment status, and open each order." path="/orders" queryFilters={statusFilter ? { status: statusFilter } : {}} columns={options} details={(row) => `/orders/${row._id}`} action={<><select aria-label="Filter by order status" className="filter-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option>{["placed", "packed", "shipped", "delivered", "cancelled"].map((value) => <option key={value}>{value}</option>)}</select><DownloadButton path="/exports/orders.csv" filename="iyalvi-orders.csv" label="Export" /></>} />;
+  return <ListingPage title="Orders" subtitle="Track fulfilment, review payment status, and open each order." path="/orders" queryFilters={statusFilter ? { status: statusFilter } : {}} columns={options} details={(row) => `/orders/${row._id}`} action={<><select aria-label="Filter by order status" className="filter-select" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option>{["placed", "packed", "shipped", "out_for_delivery", "delivered", "cancelled"].map((value) => <option key={value}>{value}</option>)}</select><DownloadButton path="/exports/orders.csv" filename="iyalvi-orders.csv" label="Export" /></>} />;
 }
 
 function DownloadButton({ path, filename, label }: { path: string; filename: string; label: string }) {
@@ -153,6 +154,9 @@ export function OrderDetailPage() {
   const [courier, setCourier] = useState("");
   const query = useQuery({ queryKey: ["admin", "orders", id], queryFn: () => adminApi.get<{ item: Order }>(`/orders/${id}`) });
   const order = query.data?.item;
+  const nextStatus = ({ placed: "packed", packed: "shipped", shipped: "out_for_delivery", out_for_delivery: "delivered" } as Record<string, string>)[order?.orderStatus ?? ""];
+  const progressSteps = ["placed", "packed", "shipped", "out_for_delivery", "delivered"];
+  const progressIndex = progressSteps.indexOf(order?.orderStatus ?? "");
   const mutation = useMutation({
     mutationFn: ({ path, body, method = "patch" }: { path: string; body: unknown; method?: "patch" | "post" }) => method === "post" ? adminApi.post(path, body) : adminApi.patch(path, body),
     onSuccess: () => { toast("Order updated."); setNote(""); void queryClient.invalidateQueries({ queryKey: ["admin"] }); void query.refetch(); },
@@ -164,18 +168,19 @@ export function OrderDetailPage() {
     <PageHeader eyebrow={`ORDER ${id.slice(-8).toUpperCase()}`} title="Order details" description={`Placed ${formatValue(order.createdAt)}`} actions={<Link className="secondary-button" to="/orders"><ArrowLeft size={16} />All orders</Link>} />
     <div className="detail-grid">
       <section className="panel detail-main"><div className="panel-heading"><div><h2>Order summary</h2><p>{recordName(order.user as Row)} · {formatValue((order.user as Row)?.email)}</p></div>{status(order.orderStatus)}</div>
+        <ol className={`admin-order-stepper ${order.orderStatus === "cancelled" ? "is-cancelled" : ""}`} aria-label="Order progress steps">{progressSteps.map((stepName, index) => <li key={stepName} className={index < progressIndex ? "is-complete" : index === progressIndex ? "is-current" : ""}>{formatValue(stepName)}</li>)}</ol>
         <div className="detail-pairs"><span>Payment</span><b>{formatValue(order.paymentMethod)} · {formatValue(order.paymentStatus)}</b><span>Order total</span><b>{money(order.total)}</b><span>Tracking</span><b>{formatValue(order.trackingNumber)} {order.courier ? `(${formatValue(order.courier)})` : ""}</b></div>
         <div className="table-scroll"><table><thead><tr><th>Item</th><th>Size</th><th>Qty</th><th>Unit price</th></tr></thead><tbody>{(order.items ?? []).map((item, index) => <tr key={String(item.product ?? index)}><td>{formatValue(item.name)}</td><td>{formatValue(item.size)}</td><td>{formatValue(item.qty)}</td><td>{money(item.unitPrice)}</td></tr>)}</tbody></table></div>
       </section>
       <section className="panel"><h2>Update order</h2><p className="muted-copy">Add a fulfilment update or an internal note.</p>
-        {canManage && order.orderStatus !== "cancelled" && order.orderStatus !== "delivered" && <div className="form-grid"><label>Internal note<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Visible only to staff" /></label><label>Courier<input value={courier} onChange={(event) => setCourier(event.target.value)} /></label><label>Tracking number<input value={trackingNumber} onChange={(event) => setTrackingNumber(event.target.value)} /></label>
+        {canManage && order.orderStatus !== "cancelled" && order.orderStatus !== "delivered" && <div className="form-grid"><label>Progress update<input readOnly value={nextStatus ? `Next step: ${formatValue(nextStatus)}` : "No further fulfilment step"} /></label><label>Internal note<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Visible only to staff" /></label><label>Courier<input value={courier} onChange={(event) => setCourier(event.target.value)} /></label><label>Tracking number<input value={trackingNumber} onChange={(event) => setTrackingNumber(event.target.value)} /></label>
           <div className="action-row">
-            {({ placed: "packed", packed: "shipped", shipped: "delivered" } as Record<string, string>)[order.orderStatus] && <button className="primary-button" onClick={() => mutation.mutate({ path: `/orders/${id}/status`, body: { status: ({ placed: "packed", packed: "shipped", shipped: "delivered" } as Record<string, string>)[order.orderStatus], ...(note ? { note } : {}) } })}>Mark {({ placed: "packed", packed: "shipped", shipped: "delivered" } as Record<string, string>)[order.orderStatus]}</button>}
+            {nextStatus && <button className="primary-button" onClick={() => mutation.mutate({ path: `/orders/${id}/status`, body: { status: nextStatus, ...(note ? { note } : {}), ...(courier.trim() ? { courier: courier.trim() } : {}), ...(trackingNumber.trim() ? { trackingNumber: trackingNumber.trim() } : {}) } })}>Update progress: {formatValue(nextStatus)}</button>}
             <button className="secondary-button" disabled={!courier || !trackingNumber} onClick={() => mutation.mutate({ path: `/orders/${id}/tracking`, body: { courier, trackingNumber } })}>Save tracking</button>
             <button className="secondary-button" disabled={!note.trim()} onClick={() => mutation.mutate({ path: `/orders/${id}/notes`, body: { note }, method: "post" })}>Add note</button>
           </div>
         </div>}
-        {canManage && order.orderStatus !== "cancelled" && order.orderStatus !== "delivered" && <ConfirmAction label="Cancel order" title="Cancel this order?" description="This changes the order state and is recorded in the audit log." destructive onConfirm={async () => { await adminApi.post(`/orders/${id}/cancel`, { note: note.trim() || "Cancelled by administrator" }); toast("Order cancelled."); void queryClient.invalidateQueries({ queryKey: ["admin"] }); void query.refetch(); }} />}
+        {canManage && ["placed", "packed"].includes(order.orderStatus) && <ConfirmAction label="Cancel order" title="Cancel this order?" description="This changes the order state and is recorded in the audit log." destructive onConfirm={async () => { await adminApi.post(`/orders/${id}/cancel`, { note: note.trim() || "Cancelled by administrator" }); toast("Order cancelled."); void queryClient.invalidateQueries({ queryKey: ["admin"] }); void query.refetch(); }} />}
       </section>
       <section className="panel"><h2>Status history</h2>{order.statusHistory?.length ? <div className="timeline">{order.statusHistory.map((entry, index) => <div key={index}><i /> <div><b>{formatValue(entry.status)}</b><small>{formatValue(entry.at)}{entry.note ? ` · ${String(entry.note)}` : ""}</small></div></div>)}</div> : <p className="muted-copy">No status history available.</p>}</section>
       <section className="panel"><h2>Internal notes</h2>{order.adminNotes?.length ? <div className="timeline">{order.adminNotes.map((entry, index) => <div key={index}><i /><div><b>{formatValue(entry.addedBy)}</b><small>{formatValue(entry.at)} · {formatValue(entry.note)}</small></div></div>)}</div> : <p className="muted-copy">No internal notes.</p>}</section>
@@ -235,6 +240,10 @@ function Metric({ title, value, icon }: { title: string; value: unknown; icon: R
 
 export function PaymentsPage() {
   const [statusFilter, setStatusFilter] = useState("");
+  const [methodFilter, setMethodFilter] = useState("");
+  const [search, setSearch] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Row | null>(null);
   const [amount, setAmount] = useState("");
@@ -243,7 +252,11 @@ export function PaymentsPage() {
   const toast = useToast();
   const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
   if (statusFilter) params.set("status", statusFilter);
-  const query = useQuery({ queryKey: ["admin", "payments", statusFilter, page], queryFn: () => adminApi.get<PageResult<Row> & { totalsByMethod: Row[]; pendingCodAmount: number; pendingCodOrders: number }>(`/payments?${params}`) });
+  if (methodFilter) params.set("method", methodFilter);
+  if (search.trim()) params.set("search", search.trim());
+  if (from) params.set("from", new Date(from).toISOString());
+  if (to) params.set("to", new Date(`${to}T23:59:59.999`).toISOString());
+  const query = useQuery({ queryKey: ["admin", "payments", statusFilter, methodFilter, search, from, to, page], queryFn: () => adminApi.get<PageResult<Row> & { totalsByMethod: Row[]; pendingCodAmount: number; pendingCodOrders: number }>(`/payments?${params}`) });
   const mutation = useMutation({
     mutationFn: () => adminApi.post(`/payments/${selected?._id}/refund`, { amount: Number(amount), note }),
     onSuccess: () => { toast("Refund recorded."); setSelected(null); setAmount(""); setNote(""); void queryClient.invalidateQueries({ queryKey: ["admin", "payments"] }); },
@@ -268,8 +281,18 @@ export function PaymentsPage() {
         : "—" },
   ];
   return <>
-    <PageHeader eyebrow="FINANCE" title="Payments" description="Review order payment methods, statuses, and refund activity." actions={<select className="filter-select" aria-label="Filter payments" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}><option value="">All payments</option>{["pending", "paid", "failed", "refunded"].map((value) => <option key={value}>{value}</option>)}</select>} />
-    <div className="metric-grid three-metrics"><Metric title="COD pending" value={money(query.data?.pendingCodAmount)} icon={<CircleDollarSign size={18} />} /><Metric title="COD orders awaiting collection" value={query.data?.pendingCodOrders} icon={<PackageCheck size={18} />} /><Metric title="Payment methods" value={query.data?.totalsByMethod?.length ?? 0} icon={<ClipboardList size={18} />} /></div>
+    <PageHeader eyebrow="FINANCE" title="Payments" description="Review payment methods, statuses, dates, and refund activity." />
+    <div className="filter-bar">
+      <input aria-label="Search payments" placeholder="Search order or customer" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} />
+      <select className="filter-select" aria-label="Filter by payment method" value={methodFilter} onChange={(event) => { setMethodFilter(event.target.value); setPage(1); }}><option value="">All methods</option>{["COD", "UPI", "CARD", "NETBANKING"].map((value) => <option key={value} value={value}>{value}</option>)}</select>
+      <select className="filter-select" aria-label="Filter by payment status" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}><option value="">All statuses</option>{["pending", "paid", "failed", "refunded"].map((value) => <option key={value}>{value}</option>)}</select>
+      <label>From<input type="date" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} /></label>
+      <label>To<input type="date" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} /></label>
+    </div>
+    <div className="metric-grid payment-metrics">{["COD", "UPI", "CARD", "NETBANKING"].map((methodName) => {
+      const totals = query.data?.totalsByMethod?.find((item) => item.method === methodName);
+      return <Metric key={methodName} title={`${methodName} total`} value={money(totals?.totalAmount ?? 0)} icon={<CircleDollarSign size={18} />} />;
+    })}<Metric title="COD pending" value={money(query.data?.pendingCodAmount)} icon={<PackageCheck size={18} />} /></div>
     <DataTable rows={query.data?.items ?? []} columns={columns} loading={query.isLoading} error={query.error} onRetry={() => void query.refetch()} />
     {query.data && <Pagination page={page} limit={PAGE_SIZE} total={query.data.total} setPage={setPage} />}
     {selected && <div className="modal-scrim"><section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="refund-heading"><h2 id="refund-heading">Record a refund</h2><p>Refund amounts are limited to the original payment total.</p><div className="form-grid"><label>Amount (₹)<input type="number" min="0.01" step="0.01" max={Number(selected.total)} value={amount} onChange={(event) => setAmount(event.target.value)} /></label><label>Reason<input value={note} onChange={(event) => setNote(event.target.value)} /></label></div><div className="modal-actions"><button className="secondary-button" onClick={() => setSelected(null)}>Close</button><button className="primary-button" disabled={!Number(amount) || !note.trim() || mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? "Saving…" : "Confirm refund"}</button></div></section></div>}
@@ -278,21 +301,36 @@ export function PaymentsPage() {
 
 const productFormSchema = z.object({
   name: z.string().trim().min(1, "Product name is required"),
-  slug: z.string().trim().min(1).regex(/^[a-z0-9-]+$/, "Use lowercase letters, numbers, and hyphens"),
-  sku: z.string().trim().optional(),
   description: z.string().max(5000).default(""),
-  category: z.enum(["saree", "kurti"]),
-  subCategory: z.string().trim().min(1),
-  fabric: z.string().trim().min(1),
-  occasion: z.string().trim().min(1),
-  colors: z.string().trim().min(1, "At least one colour is required"),
-  sizes: z.string().trim().min(1, "Enter size and stock, for example Free Size:10"),
-  price: z.coerce.number().min(0),
-  mrp: z.coerce.number().min(0),
-  costPrice: z.coerce.number().min(0).optional(),
+  category: z.enum(["", "saree", "kurti"]).transform((value) => value || undefined),
+  subCategory: z.string().trim().optional(),
+  fabric: z.string().trim().optional(),
+  colors: z.string().default(""),
+  sizes: z.array(z.object({ size: z.string().trim().min(1, "Size label is required"), stock: z.coerce.number().int().min(0) }).strict()).default([]),
+  stock: z.coerce.number().int().min(0).max(1_000_000).default(0),
+  mrp: z.coerce.number().positive("MRP is required"),
+  costPrice: z.preprocess((value) => value === "" || value === undefined ? undefined : value, z.coerce.number().min(0).optional()),
+  discountType: z.enum(["percent", "flat"]).optional(),
+  discountValue: z.preprocess((value) => value === "" || value === undefined ? undefined : value, z.coerce.number().positive().optional()),
+  discountStartsAt: z.string().optional(),
+  discountEndsAt: z.string().optional(),
   tags: z.string().optional(),
   isActive: z.boolean(),
   isFeatured: z.boolean(),
+  isNewArrival: z.boolean(),
+}).superRefine((value, context) => {
+  if (value.discountType && value.discountValue === undefined) {
+    context.addIssue({ code: "custom", message: "Enter a discount value.", path: ["discountValue"] });
+  }
+  if (value.discountType && !value.discountStartsAt) {
+    context.addIssue({ code: "custom", message: "Choose a discount start date.", path: ["discountStartsAt"] });
+  }
+  if (value.discountType && !value.discountEndsAt) {
+    context.addIssue({ code: "custom", message: "Choose a discount end date.", path: ["discountEndsAt"] });
+  }
+  if (value.discountType === "percent" && value.discountValue !== undefined && (value.discountValue < 1 || value.discountValue > 90)) {
+    context.addIssue({ code: "custom", message: "Percentage must be between 1 and 90.", path: ["discountValue"] });
+  }
 });
 type ProductInput = z.input<typeof productFormSchema>;
 type ProductFields = z.output<typeof productFormSchema>;
@@ -301,22 +339,41 @@ type Product = Row & { images?: Array<{ url: string; key: string; alt?: string; 
 export function ProductsPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const archiveProduct = async (row: Row) => {
+    try {
+      await adminApi.delete(`/products/${row._id}`);
+      toast("Product deleted from the storefront.");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "/products"] });
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Product could not be deleted.", "error");
+      throw error;
+    }
+  };
   const columns = [
     { key: "name", label: "Product" },
-    { key: "sku", label: "SKU" },
     { key: "category", label: "Category" },
-    { key: "price", label: "Price", render: (row: Row) => money(row.price) },
-    { key: "stock", label: "Stock" },
+    { key: "mrp", label: "MRP", render: (row: Row) => money(row.mrp) },
+    { key: "stock", label: "Stock", render: (row: Row) => <>{Number(row.stock) <= 5 && <span className="status-pill status-pending">Low stock</span>} {formatValue(row.stock)}</> },
     { key: "isActive", label: "Status", render: (row: Row) => status(row.isActive ? "Active" : "Inactive") },
-    { key: "actions", label: "Action", render: (row: Row) => <button className="text-button" onClick={async () => {
-      try {
-        await adminApi.patch(`/products/${row._id}`, { isActive: !row.isActive });
-        toast(row.isActive ? "Product deactivated." : "Product activated.");
-        await queryClient.invalidateQueries({ queryKey: ["admin", "/products"] });
-      } catch (error) {
-        toast(error instanceof Error ? error.message : "Product status could not be changed.", "error");
-      }
-    }}>{row.isActive ? "Deactivate" : "Activate"}</button> },
+    { key: "actions", label: "Action", render: (row: Row) => <>
+      <Link className="text-button" to={`/products/${row._id}/edit`}>Edit</Link>
+      <button className="text-button" onClick={async () => {
+        try {
+          await adminApi.patch(`/products/${row._id}`, { isActive: !row.isActive });
+          toast(row.isActive ? "Product deactivated." : "Product activated.");
+          await queryClient.invalidateQueries({ queryKey: ["admin", "/products"] });
+        } catch (error) {
+          toast(error instanceof Error ? error.message : "Product status could not be changed.", "error");
+        }
+      }}>{row.isActive ? "Deactivate" : "Activate"}</button>
+      <ConfirmAction
+        label="Delete"
+        title={`Delete ${String(row.name ?? "this product")}?`}
+        description="This removes the product from the customer storefront. Existing order records are preserved."
+        destructive
+        onConfirm={() => archiveProduct(row)}
+      />
+    </> },
   ];
   return <ListingPage title="Products" subtitle="Manage your catalogue, pricing, inventory, and imagery." path="/products" columns={columns} details={(row) => `/products/${row._id}/edit`} action={<Link to="/products/new" className="primary-button"><Plus size={16} />Add product</Link>} />;
 }
@@ -333,46 +390,63 @@ export function ProductEditorPage() {
     queryFn: async () => (await adminApi.get<{ item: Product }>(`/products/${id}`)).item,
     enabled: isEdit,
   });
+  const discountQuery = useQuery({
+    queryKey: ["admin", "products", id, "discount"],
+    queryFn: () => adminApi.get<{ item: Row | null }>(`/products/${id}/discount`),
+    enabled: isEdit,
+  });
+  const toLocalDateTime = (value: unknown) => {
+    if (!value) return "";
+    const date = new Date(String(value));
+    return Number.isNaN(date.getTime()) ? "" : new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  };
   const form = useForm<ProductInput, unknown, ProductFields>({
     resolver: zodResolver(productFormSchema),
     values: query.data ? {
       name: String(query.data.name ?? ""),
-      slug: String(query.data.slug ?? ""),
-      sku: String(query.data.sku ?? ""),
       description: String(query.data.description ?? ""),
-      category: query.data.category === "kurti" ? "kurti" : "saree",
+      category: query.data.category === "kurti" ? "kurti" : query.data.category === "saree" ? "saree" : "",
       subCategory: String(query.data.subCategory ?? ""),
       fabric: String(query.data.fabric ?? ""),
-      occasion: String(query.data.occasion ?? ""),
       colors: (query.data.colors ?? []).join(", "),
-      sizes: (query.data.sizes ?? []).map(({ size, stock }) => `${size}:${stock}`).join(", "),
-      price: Number(query.data.price ?? 0),
+      sizes: query.data.sizes ?? [],
+      stock: Number(query.data.stock ?? 0),
       mrp: Number(query.data.mrp ?? 0),
       costPrice: query.data.costPrice === undefined ? undefined : Number(query.data.costPrice),
+      discountType: discountQuery.data?.item?.type === "flat" ? "flat" : discountQuery.data?.item ? "percent" : undefined,
+      discountValue: discountQuery.data?.item?.value === undefined ? undefined : Number(discountQuery.data.item.value),
+      discountStartsAt: toLocalDateTime(discountQuery.data?.item?.startsAt),
+      discountEndsAt: toLocalDateTime(discountQuery.data?.item?.endsAt),
       tags: (query.data.tags ?? []).join(", "),
       isActive: Boolean(query.data.isActive),
       isFeatured: Boolean(query.data.isFeatured),
+      isNewArrival: Boolean(query.data.isNewArrival),
     } : undefined,
-    defaultValues: { name: "", slug: "", sku: "", description: "", category: "saree", subCategory: "", fabric: "", occasion: "", colors: "", sizes: "Free Size:0", price: 0, mrp: 0, tags: "", isActive: true, isFeatured: false },
+    defaultValues: { name: "", description: "", category: "", subCategory: "", fabric: "", colors: "", sizes: [], stock: 0, mrp: 0, discountType: undefined, discountValue: undefined, discountStartsAt: "", discountEndsAt: "", tags: "", isActive: true, isFeatured: false, isNewArrival: false },
   });
+  const sizeRows = useFieldArray({ control: form.control, name: "sizes" });
+  const productDiscountType = useWatch({ control: form.control, name: "discountType" });
   const mutation = useMutation({
     mutationFn: async (values: ProductFields) => {
-      const sizes = values.sizes.split(",").map((pair) => {
-        const [size, stock] = pair.split(":");
-        if (!size?.trim() || !Number.isInteger(Number(stock)) || Number(stock) < 0) throw new Error("Sizes must use the format Size:stock, for example S:5, M:3.");
-        return { size: size.trim(), stock: Number(stock) };
-      });
+      const { discountType, discountValue, discountStartsAt, discountEndsAt, ...productValues } = values;
       const payload = {
-        ...values,
-        sku: values.sku || undefined,
-        colors: values.colors.split(",").map((value) => value.trim()).filter(Boolean),
+        ...productValues,
+        colors: (values.colors ?? "").split(",").map((value) => value.trim()).filter(Boolean),
         tags: (values.tags ?? "").split(",").map((value) => value.trim()).filter(Boolean),
-        sizes,
+        ...(values.sizes.length ? { stock: undefined } : {}),
       };
       const saved = isEdit
         ? await adminApi.patch<{ item: Product }>(`/products/${id}`, payload)
         : await adminApi.post<{ item: Product }>("/products", payload);
       const product = saved.item;
+      if (discountType && discountValue !== undefined && discountStartsAt && discountEndsAt) {
+        await adminApi.patch(`/products/${product._id}/discount`, {
+          type: discountType,
+          value: discountValue,
+          startsAt: new Date(discountStartsAt).toISOString(),
+          endsAt: new Date(discountEndsAt).toISOString(),
+        });
+      }
       if (images.length) {
         const formData = new FormData();
         images.forEach((file) => formData.append("images", file));
@@ -389,10 +463,8 @@ export function ProductEditorPage() {
     onError: (error) => toast(error instanceof Error ? error.message : "Product could not be saved.", "error"),
   });
   const fields: Array<{ name: keyof ProductInput; label: string; type?: string }> = [
-    { name: "name", label: "Product name" }, { name: "slug", label: "URL slug" }, { name: "sku", label: "SKU" },
-    { name: "category", label: "Category", type: "select" }, { name: "subCategory", label: "Sub-category" },
-    { name: "fabric", label: "Fabric" }, { name: "occasion", label: "Occasion" }, { name: "colors", label: "Colours (comma-separated)" },
-    { name: "sizes", label: "Sizes and stock (Size:stock, comma-separated)" }, { name: "price", label: "Price (₹)", type: "number" },
+    { name: "name", label: "Product name" }, { name: "category", label: "Category", type: "select" },
+    { name: "subCategory", label: "Sub-category" }, { name: "fabric", label: "Fabric" }, { name: "colors", label: "Colours (comma-separated)" },
     { name: "mrp", label: "MRP (₹)", type: "number" }, { name: "costPrice", label: "Cost price (₹)", type: "number" },
     { name: "tags", label: "Tags (comma-separated)" },
   ];
@@ -403,13 +475,30 @@ export function ProductEditorPage() {
     {query.error && <ErrorState error={query.error} />}
     <form className="panel editor-form" onSubmit={form.handleSubmit((values) => mutation.mutate(values))}>
       <div className="form-grid">{fields.map(({ name, label, type }) => <label key={name}>{label}
-        {type === "select" ? <select {...form.register(name)}><option value="saree">Saree</option><option value="kurti">Kurti</option></select> : <input type={type ?? "text"} step={type === "number" ? "0.01" : undefined} {...form.register(name)} />}
+        {type === "select" ? <select {...form.register(name)}><option value="">Not specified</option><option value="saree">Saree</option><option value="kurti">Kurti</option></select> : <input required={name === "name" || name === "mrp"} type={type ?? "text"} step={type === "number" ? "0.01" : undefined} {...form.register(name)} />}
         {form.formState.errors[name] && <small className="field-error">{String(form.formState.errors[name]?.message)}</small>}
       </label>)}
         <label className="checkbox-label"><input type="checkbox" {...form.register("isActive")} />Active in storefront</label>
         <label className="checkbox-label"><input type="checkbox" {...form.register("isFeatured")} />Featured product</label>
+        <label className="checkbox-label"><input type="checkbox" {...form.register("isNewArrival")} />New arrival</label>
         <label className="full-field">Description<textarea rows={4} {...form.register("description")} /></label>
       </div>
+      <section className="product-stock"><h2>Inventory</h2>
+        {sizeRows.fields.length > 0 ? <div className="size-stock-list">{sizeRows.fields.map((field, index) => <div className="size-stock-row" key={field.id}>
+          <label>Size<input {...form.register(`sizes.${index}.size`)} /></label>
+          <label>Stock<input type="number" min="0" step="1" {...form.register(`sizes.${index}.stock`)} /></label>
+          <button type="button" className="text-button" onClick={() => sizeRows.remove(index)}>Remove size</button>
+          {form.formState.errors.sizes?.[index]?.size?.message && <small className="field-error">{form.formState.errors.sizes[index]?.size?.message}</small>}
+        </div>)}</div> : <label>Total stock<input type="number" min="0" step="1" {...form.register("stock")} /></label>}
+        <div className="action-row"><button type="button" className="secondary-button" onClick={() => sizeRows.append({ size: "", stock: 0 })}>Add size stock</button></div>
+        {form.formState.errors.sizes?.message && <small className="field-error">{form.formState.errors.sizes.message}</small>}
+      </section>
+      <section className="product-discount"><h2>Optional product discount</h2><p>Creates or updates the linked automatic discount. Leave type blank to keep the current offer unchanged.</p><div className="form-grid">
+        <label>Discount type<select {...form.register("discountType")}><option value="">No change</option><option value="percent">Percentage</option><option value="flat">Flat amount</option></select></label>
+        <label>Discount value<input type="number" min={productDiscountType === "percent" ? 1 : 0.01} max={productDiscountType === "percent" ? 90 : undefined} step="0.01" {...form.register("discountValue")} /></label>
+        <label>Start date/time<input type="datetime-local" {...form.register("discountStartsAt")} /></label>
+        <label>End date/time<input type="datetime-local" {...form.register("discountEndsAt")} /></label>
+      </div></section>
       <div className="image-upload"><div><b>Product images</b><p>JPEG, PNG, or WebP. Up to 8 images, 5 MB each. Uploads are securely processed.</p></div><label className={`secondary-button ${query.data?.images?.length === 8 ? "disabled-control" : ""}`}><ImagePlus size={16} />Choose images<input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={query.data?.images?.length === 8} onChange={(event) => setImages(Array.from(event.target.files ?? []).slice(0, Math.max(0, 8 - (query.data?.images?.length ?? 0))))} /></label></div>
       {images.length > 0 && <div className="file-preview">{images.map((file) => <span key={`${file.name}-${file.size}`}>{file.name}</span>)}</div>}
       {query.data?.images?.length ? <div className="image-gallery">{query.data.images.map((image) => <div className="image-tile" key={image.key}><img src={image.url} alt={image.alt ?? ""} /><ConfirmAction label="Remove" title="Remove this image?" description="This removes the image from this product gallery." destructive onConfirm={async () => {
@@ -437,7 +526,7 @@ const discountSchema = z.object({
   stackable: z.boolean(),
 }).superRefine((item, context) => {
   if (new Date(item.endsAt) <= new Date(item.startsAt)) context.addIssue({ code: "custom", message: "End time must be after start time.", path: ["endsAt"] });
-  if (item.type === "percent" && item.value > 90) context.addIssue({ code: "custom", message: "Percentage must not exceed 90.", path: ["value"] });
+  if (item.type === "percent" && (item.value < 1 || item.value > 90)) context.addIssue({ code: "custom", message: "Percentage must be between 1 and 90.", path: ["value"] });
   if (item.scope === "sitewide" && item.targets?.trim()) context.addIssue({ code: "custom", message: "Sitewide discounts do not have targets.", path: ["targets"] });
   if (item.scope !== "sitewide" && !item.targets?.trim()) context.addIssue({ code: "custom", message: "Add one or more targets.", path: ["targets"] });
 });
@@ -446,6 +535,7 @@ type DiscountFields = z.infer<typeof discountSchema>;
 export function DiscountsPage() {
   const [tab, setTab] = useState<"discounts" | "coupons">("discounts");
   const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<Row | null>(null);
   const [page, setPage] = useState(1);
   const path = tab === "discounts" ? "/discounts" : "/coupons";
   const query = usePaged<Row>(path, page);
@@ -459,37 +549,50 @@ export function DiscountsPage() {
     { key: "startsAt", label: "Starts" },
     { key: "endsAt", label: "Ends" },
     { key: "isActive", label: "State", render: (row: Row) => status(row.isActive ? "Active" : "Inactive") },
-    { key: "actions", label: "Action", render: (row: Row) => <button className="text-button" onClick={async () => { try { await adminApi.patch(`/discounts/${row._id}`, { isActive: !row.isActive }); toast(row.isActive ? "Discount deactivated." : "Discount activated."); await queryClient.invalidateQueries({ queryKey: ["admin"] }); } catch (error) { toast(error instanceof Error ? error.message : "Discount could not be updated.", "error"); } }}>{row.isActive ? "Deactivate" : "Activate"}</button> },
+    { key: "actions", label: "Action", render: (row: Row) => <><button className="text-button" onClick={() => { setEditing(row); setCreateOpen(true); }}>Edit</button><button className="text-button" onClick={async () => { try { await adminApi.patch(`/discounts/${row._id}`, { isActive: !row.isActive }); toast(row.isActive ? "Discount deactivated." : "Discount activated."); await queryClient.invalidateQueries({ queryKey: ["admin"] }); } catch (error) { toast(error instanceof Error ? error.message : "Discount could not be updated.", "error"); } }}>{row.isActive ? "Deactivate" : "Activate"}</button></> },
   ] : [
     { key: "code", label: "Coupon code" }, { key: "type", label: "Type" }, { key: "value", label: "Value" },
     { key: "usedCount", label: "Used" }, { key: "usageLimit", label: "Usage limit" }, { key: "expiresAt", label: "Expires" },
     { key: "isActive", label: "State", render: (row: Row) => status(row.isActive ? "Active" : "Inactive") },
-    { key: "actions", label: "Action", render: (row: Row) => <button className="text-button" onClick={async () => { try { await adminApi.patch(`/coupons/${row._id}`, { isActive: !row.isActive }); toast(row.isActive ? "Coupon deactivated." : "Coupon activated."); await queryClient.invalidateQueries({ queryKey: ["admin"] }); } catch (error) { toast(error instanceof Error ? error.message : "Coupon could not be updated.", "error"); } }}>{row.isActive ? "Deactivate" : "Activate"}</button> },
+    { key: "actions", label: "Action", render: (row: Row) => <><button className="text-button" onClick={() => { setEditing(row); setCreateOpen(true); }}>Edit</button><button className="text-button" onClick={async () => { try { await adminApi.patch(`/coupons/${row._id}`, { isActive: !row.isActive }); toast(row.isActive ? "Coupon deactivated." : "Coupon activated."); await queryClient.invalidateQueries({ queryKey: ["admin"] }); } catch (error) { toast(error instanceof Error ? error.message : "Coupon could not be updated.", "error"); } }}>{row.isActive ? "Deactivate" : "Activate"}</button></> },
   ];
   return <>
-    <PageHeader eyebrow="PROMOTIONS" title="Discounts & coupons" description="Manage automatic offers and customer redemption codes." actions={<button className="primary-button" onClick={() => setCreateOpen(true)}><Plus size={16} />Create {tab === "discounts" ? "discount" : "coupon"}</button>} />
-    <div className="tabs" role="tablist"><button className={tab === "discounts" ? "tab-active" : ""} onClick={() => { setTab("discounts"); setPage(1); }}>Automatic discounts</button><button className={tab === "coupons" ? "tab-active" : ""} onClick={() => { setTab("coupons"); setPage(1); }}>Coupons</button></div>
+    <PageHeader eyebrow="PROMOTIONS" title="Discounts & coupons" description="Manage automatic offers and customer redemption codes." actions={<button className="primary-button" onClick={() => { setEditing(null); setCreateOpen(true); }}><Plus size={16} />Create {tab === "discounts" ? "discount" : "coupon"}</button>} />
+    <div className="tabs" role="tablist"><button className={tab === "discounts" ? "tab-active" : ""} onClick={() => { setTab("discounts"); setEditing(null); setCreateOpen(false); setPage(1); }}>Automatic discounts</button><button className={tab === "coupons" ? "tab-active" : ""} onClick={() => { setTab("coupons"); setEditing(null); setCreateOpen(false); setPage(1); }}>Coupons</button></div>
     <DataTable rows={query.data?.items ?? []} columns={columns} loading={query.isLoading} error={query.error} onRetry={() => void query.refetch()} />
     {query.data && <Pagination page={page} limit={PAGE_SIZE} total={query.data.total} setPage={setPage} />}
-    {createOpen && (tab === "discounts" ? <DiscountForm onClose={() => setCreateOpen(false)} /> : <CouponForm onClose={() => setCreateOpen(false)} />)}
+    {createOpen && (tab === "discounts" ? <DiscountForm record={editing ?? undefined} onClose={() => { setCreateOpen(false); setEditing(null); }} /> : <CouponForm record={editing ?? undefined} onClose={() => { setCreateOpen(false); setEditing(null); }} />)}
   </>;
 }
 
-function DiscountForm({ onClose }: { onClose(): void }) {
+function DiscountForm({ record, onClose }: { record?: Row; onClose(): void }) {
+  const localDateTime = (value: unknown) => {
+    if (!value) return "";
+    const date = new Date(String(value));
+    return Number.isNaN(date.getTime()) ? "" : new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  };
   const form = useForm<DiscountFields>({
     resolver: zodResolver(discountSchema),
-    defaultValues: { name: "", scope: "sitewide", targets: "", type: "percent", value: 10, maxDiscount: undefined, startsAt: new Date().toISOString().slice(0, 16), endsAt: "", priority: 0, isActive: true, isFlashSale: false, stackable: false },
+    defaultValues: record ? {
+      name: String(record.name ?? ""), scope: String(record.scope ?? "sitewide") as DiscountFields["scope"],
+      targets: Array.isArray(record.targets) ? record.targets.join(", ") : "", type: String(record.type ?? "percent") as DiscountFields["type"],
+      value: Number(record.value ?? 10), maxDiscount: record.maxDiscount === undefined ? undefined : Number(record.maxDiscount),
+      startsAt: localDateTime(record.startsAt), endsAt: localDateTime(record.endsAt), priority: Number(record.priority ?? 0),
+      isActive: Boolean(record.isActive), isFlashSale: Boolean(record.isFlashSale), stackable: Boolean(record.stackable),
+    } : { name: "", scope: "sitewide", targets: "", type: "percent", value: 10, maxDiscount: undefined, startsAt: new Date().toISOString().slice(0, 16), endsAt: "", priority: 0, isActive: true, isFlashSale: false, stackable: false },
   });
   const queryClient = useQueryClient();
   const toast = useToast();
   const scope = useWatch({ control: form.control, name: "scope" });
   return <div className="modal-scrim"><form className="modal-card wide-modal" onSubmit={form.handleSubmit(async (values) => {
     try {
-      await adminApi.post("/discounts", { ...values, targets: values.scope === "sitewide" ? [] : values.targets?.split(",").map((target) => target.trim()).filter(Boolean), startsAt: new Date(values.startsAt).toISOString(), endsAt: new Date(values.endsAt).toISOString() });
-      toast("Discount created."); await queryClient.invalidateQueries({ queryKey: ["admin"] }); onClose();
-    } catch (error) { form.setError("root", { message: error instanceof Error ? error.message : "Discount could not be created." }); }
+      const payload = { ...values, targets: values.scope === "sitewide" ? [] : values.targets?.split(",").map((target) => target.trim()).filter(Boolean), startsAt: new Date(values.startsAt).toISOString(), endsAt: new Date(values.endsAt).toISOString() };
+      if (record) await adminApi.patch(`/discounts/${record._id}`, payload);
+      else await adminApi.post("/discounts", payload);
+      toast(record ? "Discount updated." : "Discount created."); await queryClient.invalidateQueries({ queryKey: ["admin"] }); onClose();
+    } catch (error) { form.setError("root", { message: error instanceof Error ? error.message : "Discount could not be saved." }); }
   })}>
-    <span className="eyebrow">NEW PROMOTION</span><h2>Create discount</h2>
+    <span className="eyebrow">{record ? "EDIT PROMOTION" : "NEW PROMOTION"}</span><h2>{record ? "Edit discount" : "Create discount"}</h2>
     <div className="form-grid">
       <label>Name<input {...form.register("name")} /></label>
       <label>Scope<select {...form.register("scope")}><option value="sitewide">Sitewide</option><option value="product">Product</option><option value="category">Category</option><option value="collection">Collection</option></select></label>
@@ -506,26 +609,40 @@ function DiscountForm({ onClose }: { onClose(): void }) {
     </div>
     {form.formState.errors.root && <p className="field-error">{form.formState.errors.root.message}</p>}
     {Object.values(form.formState.errors).map((error, index) => error?.message && <p className="field-error" key={index}>{error.message}</p>)}
-    <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button">Create discount</button></div>
+    <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button">{record ? "Save discount" : "Create discount"}</button></div>
   </form></div>;
 }
 
-const couponSchema = z.object({ code: z.string().trim().min(1).regex(/^[A-Za-z0-9_-]+$/), type: z.enum(["percent", "flat"]), value: z.coerce.number().positive(), minOrder: z.coerce.number().min(0), maxDiscount: z.coerce.number().min(0).optional(), expiresAt: z.string().min(1), usageLimit: z.coerce.number().int().min(1), perUserLimit: z.coerce.number().int().min(1), isActive: z.boolean() });
-function CouponForm({ onClose }: { onClose(): void }) {
-  const form = useForm({ resolver: zodResolver(couponSchema), defaultValues: { code: "", type: "percent" as const, value: 10, minOrder: 0, maxDiscount: undefined, expiresAt: "", usageLimit: 100, perUserLimit: 1, isActive: true } });
+const couponSchema = z.object({ code: z.string().trim().min(1).regex(/^[A-Za-z0-9_-]+$/), type: z.enum(["percent", "flat"]), value: z.coerce.number().positive(), minOrder: z.coerce.number().min(0), maxDiscount: z.coerce.number().min(0).optional(), expiresAt: z.string().min(1), usageLimit: z.coerce.number().int().min(1), perUserLimit: z.coerce.number().int().min(1), isActive: z.boolean() }).superRefine((value, context) => {
+  if (value.type === "percent" && (value.value < 1 || value.value > 90)) context.addIssue({ code: "custom", message: "Percentage must be between 1 and 90.", path: ["value"] });
+});
+function CouponForm({ record, onClose }: { record?: Row; onClose(): void }) {
+  const couponDateTime = (value: unknown) => {
+    if (!value) return "";
+    const date = new Date(String(value));
+    return Number.isNaN(date.getTime()) ? "" : new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  };
+  const form = useForm({ resolver: zodResolver(couponSchema), defaultValues: record ? {
+    code: String(record.code ?? ""), type: String(record.type ?? "percent") as "percent" | "flat", value: Number(record.value ?? 10),
+    minOrder: Number(record.minOrder ?? 0), maxDiscount: record.maxDiscount === undefined ? undefined : Number(record.maxDiscount),
+    expiresAt: couponDateTime(record.expiresAt), usageLimit: Number(record.usageLimit ?? 100), perUserLimit: Number(record.perUserLimit ?? 1), isActive: Boolean(record.isActive),
+  } : { code: "", type: "percent" as const, value: 10, minOrder: 0, maxDiscount: undefined, expiresAt: "", usageLimit: 100, perUserLimit: 1, isActive: true } });
+  const couponType = useWatch({ control: form.control, name: "type" });
   const queryClient = useQueryClient();
   const toast = useToast();
   return <div className="modal-scrim"><form className="modal-card wide-modal" onSubmit={form.handleSubmit(async (values) => {
     try {
-      await adminApi.post("/coupons", { ...values, code: values.code.toUpperCase(), expiresAt: new Date(values.expiresAt).toISOString() });
-      toast("Coupon created."); await queryClient.invalidateQueries({ queryKey: ["admin"] }); onClose();
-    } catch (error) { form.setError("root", { message: error instanceof Error ? error.message : "Coupon could not be created." }); }
+      const payload = { ...values, code: values.code.toUpperCase(), expiresAt: new Date(values.expiresAt).toISOString() };
+      if (record) await adminApi.patch(`/coupons/${record._id}`, payload);
+      else await adminApi.post("/coupons", payload);
+      toast(record ? "Coupon updated." : "Coupon created."); await queryClient.invalidateQueries({ queryKey: ["admin"] }); onClose();
+    } catch (error) { form.setError("root", { message: error instanceof Error ? error.message : "Coupon could not be saved." }); }
   })}>
-    <span className="eyebrow">NEW COUPON</span><h2>Create coupon</h2>
+    <span className="eyebrow">{record ? "EDIT COUPON" : "NEW COUPON"}</span><h2>{record ? "Edit coupon" : "Create coupon"}</h2>
     <div className="form-grid">
       <label>Coupon code<input {...form.register("code")} /></label>
       <label>Type<select {...form.register("type")}><option value="percent">Percentage</option><option value="flat">Flat amount</option></select></label>
-      <label>Value<input type="number" step="0.01" min="0.01" {...form.register("value")} /></label>
+      <label>Value<input type="number" step="0.01" min="1" max={couponType === "percent" ? 90 : undefined} {...form.register("value")} /></label>
       <label>Minimum order<input type="number" step="0.01" min="0" {...form.register("minOrder")} /></label>
       <label>Maximum discount<input type="number" step="0.01" min="0" {...form.register("maxDiscount")} /></label>
       <label>Expires<input type="datetime-local" {...form.register("expiresAt")} /></label>
@@ -534,31 +651,163 @@ function CouponForm({ onClose }: { onClose(): void }) {
       <label className="checkbox-label"><input type="checkbox" {...form.register("isActive")} />Active</label>
     </div>
     {form.formState.errors.root && <p className="field-error">{form.formState.errors.root.message}</p>}
-    <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button">Create coupon</button></div>
+    <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button">{record ? "Save coupon" : "Create coupon"}</button></div>
   </form></div>;
 }
 
 export function MessagesPage() {
-  const [filter, setFilter] = useState("");
+  const [filter, setFilter] = useState<"all" | "new" | "read" | "resolved">("all");
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+  const [selectedId, setSelectedId] = useState("");
   const queryClient = useQueryClient();
   const toast = useToast();
-  const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
-  if (filter) params.set("isResolved", filter);
-  const query = useQuery({ queryKey: ["admin", "messages", filter, page], queryFn: () => adminApi.get<PageResult<Row>>(`/messages?${params}`) });
-  const columns = [
-    { key: "name", label: "From" }, { key: "email", label: "Email" }, { key: "message", label: "Message", className: "message-cell" },
-    { key: "isRead", label: "Read", render: (row: Row) => status(row.isRead ? "Read" : "Unread") },
-    { key: "isResolved", label: "Resolution", render: (row: Row) => status(row.isResolved ? "Resolved" : "Open") },
-    { key: "createdAt", label: "Received" },
-    { key: "actions", label: "Action", render: (row: Row) => <button className="text-button" onClick={async () => {
-      try { await adminApi.patch(`/messages/${row._id}`, { isRead: true, isResolved: !row.isResolved }); toast(row.isResolved ? "Message reopened." : "Message resolved."); await queryClient.invalidateQueries({ queryKey: ["admin", "messages"] }); } catch (error) { toast(error instanceof Error ? error.message : "Could not update message.", "error"); }
-    }}>{row.isResolved ? "Reopen" : "Resolve"}</button> },
-  ];
+  const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE), sortBy: "createdAt", sortOrder });
+  if (filter !== "all") params.set("status", filter);
+  if (search.trim()) params.set("search", search.trim());
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  const query = useQuery({
+    queryKey: ["admin", "messages", filter, search, from, to, sortOrder, page],
+    queryFn: () => adminApi.get<PageResult<ContactMessage>>(`/messages?${params}`),
+  });
+  const detailQuery = useQuery({
+    queryKey: ["admin", "message", selectedId],
+    queryFn: async () => (await adminApi.get<{ item: ContactMessage }>(`/messages/${selectedId}`)).item,
+    enabled: Boolean(selectedId),
+  });
+  const item = detailQuery.data;
+  const admin = useAdmin().data;
+  const canDelete = admin?.role === "superadmin" || admin?.role === "manager";
+  useEffect(() => {
+    if (item) {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "messages"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin", "messages", "unread-count"] });
+    }
+  }, [item, queryClient]);
+
+  async function updateStatus(nextStatus: MessageStatus) {
+    if (!item) return;
+    try {
+      const result = await adminApi.patch<{ item: ContactMessage }>(`/messages/${item._id}/status`, { status: nextStatus });
+      queryClient.setQueryData(["admin", "message", item._id], result.item);
+      toast(nextStatus === "resolved" ? "Message resolved." : nextStatus === "read" ? "Message marked as read." : "Message reopened.");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "messages"] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "messages", "unread-count"] });
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not update message.", "error");
+    }
+  }
+
   return <>
-    <PageHeader eyebrow="CUSTOMER CARE" title="Messages" description="Review contact form messages and follow up with customers." actions={<select className="filter-select" aria-label="Filter messages" value={filter} onChange={(event) => { setFilter(event.target.value); setPage(1); }}><option value="">All messages</option><option value="false">Open</option><option value="true">Resolved</option></select>} />
-    <DataTable rows={query.data?.items ?? []} columns={columns} loading={query.isLoading} error={query.error} onRetry={() => void query.refetch()} emptyTitle="Inbox is clear" emptyMessage="Customer messages will appear here." />
-    {query.data && <Pagination page={page} limit={PAGE_SIZE} total={query.data.total} setPage={setPage} />}
+    <PageHeader eyebrow="CUSTOMER CARE" title="Messages" description="Review contact form messages and follow up with customers." />
+    <div className="message-toolbar">
+      <SearchField value={search} onChange={(value) => { setSearch(value); setPage(1); }} placeholder="Search name, email, or subject…" />
+      <label>From <input aria-label="Messages from date" type="date" className="filter-select" value={from} onChange={(event) => { setFrom(event.target.value); setPage(1); }} /></label>
+      <label>To <input aria-label="Messages to date" type="date" className="filter-select" value={to} onChange={(event) => { setTo(event.target.value); setPage(1); }} /></label>
+      <button className="secondary-button" onClick={() => setSortOrder((value) => value === "desc" ? "asc" : "desc")}>Date {sortOrder === "desc" ? "newest first" : "oldest first"}</button>
+    </div>
+    <div className="message-filters" role="group" aria-label="Filter messages by status">
+      {(["all", "new", "read", "resolved"] as const).map((value) => <button
+        key={value}
+        className={filter === value ? "primary-button" : "secondary-button"}
+        aria-pressed={filter === value}
+        onClick={() => { setFilter(value); setPage(1); }}
+      >{value === "all" ? "All" : value === "new" ? "New" : value[0]!.toUpperCase() + value.slice(1)}</button>)}
+    </div>
+    <div className="message-workspace">
+      <section className="panel message-list" aria-label="Customer messages">
+        {query.isLoading ? <SkeletonRows /> : query.error ? <ErrorState error={query.error} retry={() => void query.refetch()} /> : !query.data?.items.length
+          ? <EmptyState title="Inbox is clear" message="Customer messages matching these filters will appear here." />
+          : query.data.items.map((message) => <button
+            key={message._id}
+            className={`message-list-item ${message._id === selectedId ? "message-selected" : ""}`}
+            onClick={() => setSelectedId(message._id)}
+          >
+            <span className="message-list-heading"><b style={{ fontWeight: messageStatus(message) === "new" ? 750 : 500 }}>{message.name}</b>{status(messageStatus(message))}</span>
+            <strong style={{ fontWeight: messageStatus(message) === "new" ? 700 : 500 }}>{message.subject || "Customer enquiry"}</strong>
+            <span>{message.email}</span>
+            <small>{new Date(message.createdAt).toLocaleString()}</small>
+          </button>)}
+        {query.data && <Pagination page={page} limit={query.data.limit} total={query.data.total} setPage={setPage} />}
+      </section>
+      <section className="panel message-detail" aria-label="Message details">
+        {!selectedId ? <EmptyState title="Select a message" message="Choose a message to read and respond." />
+          : detailQuery.isLoading ? <SkeletonRows count={5} />
+            : detailQuery.error ? <ErrorState error={detailQuery.error} retry={() => void detailQuery.refetch()} />
+              : item ? <MessageDetailPanel
+                key={item._id}
+                item={item}
+                canDelete={canDelete}
+                onStatus={updateStatus}
+                onDelete={async () => {
+                  await adminApi.delete(`/messages/${item._id}`);
+                  setSelectedId("");
+                  await queryClient.invalidateQueries({ queryKey: ["admin", "messages"] });
+                  await queryClient.invalidateQueries({ queryKey: ["admin", "messages", "unread-count"] });
+                  toast("Message deleted.");
+                }}
+              /> : null}
+      </section>
+    </div>
+  </>;
+}
+
+function MessageDetailPanel({
+  item,
+  canDelete,
+  onStatus,
+  onDelete,
+}: {
+  item: ContactMessage;
+  canDelete: boolean;
+  onStatus: (status: MessageStatus) => void;
+  onDelete: () => Promise<void>;
+}) {
+  const [note, setNote] = useState(item.adminNote ?? "");
+  const queryClient = useQueryClient();
+  const toast = useToast();
+
+  async function saveNote() {
+    try {
+      const result = await adminApi.patch<{ item: ContactMessage }>(`/messages/${item._id}/note`, { adminNote: note });
+      queryClient.setQueryData(["admin", "message", item._id], result.item);
+      toast("Internal note saved.");
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "Could not save the note.", "error");
+    }
+  }
+
+  return <>
+    <div className="message-detail-heading">
+      <div><span className="eyebrow">CUSTOMER MESSAGE</span><h2>{item.subject || "Customer enquiry"}</h2></div>
+      {status(messageStatus(item))}
+    </div>
+    <dl className="detail-pairs"><dt>From</dt><dd>{item.name}</dd><dt>Email</dt><dd><a href={`mailto:${encodeURIComponent(item.email)}`}>{item.email}</a></dd><dt>Received</dt><dd>{new Date(item.createdAt).toLocaleString()}</dd></dl>
+    <p className="message-body">{item.message}</p>
+    <div className="message-actions">
+      {messageStatus(item) === "new" && <button className="secondary-button" onClick={() => onStatus("read")}>Mark as read</button>}
+      {messageStatus(item) !== "resolved"
+        ? <button className="primary-button" onClick={() => onStatus("resolved")}>Mark resolved</button>
+        : <button className="secondary-button" onClick={() => onStatus("read")}>Reopen</button>}
+      <a className="secondary-button" href={`mailto:${encodeURIComponent(item.email)}?subject=${encodeURIComponent(`Re: ${item.subject || "Your message to Iyalvi"}`)}`}><Mail size={15} />Reply by email</a>
+      <a className="secondary-button" href={`https://wa.me/?text=${encodeURIComponent(`Hi ${item.name}, thank you for contacting Iyalvi. ${item.message}`)}`} target="_blank" rel="noreferrer"><MessageCircle size={15} />Reply on WhatsApp</a>
+      {canDelete && <ConfirmAction
+        label="Delete"
+        title="Delete this message?"
+        description="This permanently removes the customer message."
+        destructive
+        onConfirm={onDelete}
+      />}
+    </div>
+    <div className="message-note">
+      <label htmlFor="message-note">Internal note</label>
+      <textarea id="message-note" rows={4} value={note} onChange={(event) => setNote(event.target.value)} maxLength={3000} />
+      <div><small>Visible only to administrators.</small><button className="primary-button" onClick={() => void saveNote()}>Save note</button></div>
+    </div>
   </>;
 }
 
@@ -581,14 +830,20 @@ export function ReportsPage() {
   </>;
 }
 
-export function StaffPage() {
-  return <UnavailablePage title="Staff" description="Manage administrator access and staff roles." endpoint="Staff management is not available in the current admin API. Ask your system administrator to provision or update staff accounts." />;
-}
+type MessageStatus = "new" | "read" | "resolved";
+type ContactMessage = {
+  _id: string;
+  name: string;
+  email: string;
+  subject?: string;
+  message: string;
+  status?: MessageStatus;
+  isRead?: boolean;
+  isResolved?: boolean;
+  adminNote?: string;
+  createdAt: string;
+};
 
-export function SettingsPage() {
-  return <UnavailablePage title="Settings" description="Store preferences and administrative configuration." endpoint="Settings management is not available in the current admin API. No settings were changed." />;
-}
-
-function UnavailablePage({ title, description, endpoint }: { title: string; description: string; endpoint: string }) {
-  return <><PageHeader eyebrow="ADMINISTRATION" title={title} description={description} /><section className="panel unavailable-panel"><span className="report-icon"><RefreshCw size={20} /></span><h2>Endpoint not available</h2><p>{endpoint}</p></section></>;
+function messageStatus(message: ContactMessage): MessageStatus {
+  return message.status ?? (message.isResolved ? "resolved" : message.isRead ? "read" : "new");
 }

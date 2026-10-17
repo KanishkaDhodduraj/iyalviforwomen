@@ -14,9 +14,13 @@ import { Route as AboutRouteImport } from './routes/about'
 import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as KurtisRouteImport } from './routes/kurtis'
+import { Route as LoveNotesRouteImport } from './routes/love-notes'
+import { Route as MyOrdersRouteImport } from './routes/my-orders'
 import { Route as NewArrivalsRouteImport } from './routes/new-arrivals'
 import { Route as OffersRouteImport } from './routes/offers'
 import { Route as SareesRouteImport } from './routes/sarees'
+import { Route as StyleReelsRouteImport } from './routes/style-reels'
+import { Route as TrendTalksRouteImport } from './routes/trend-talks'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -43,6 +47,16 @@ const KurtisRoute = KurtisRouteImport.update({
   path: '/kurtis',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoveNotesRoute = LoveNotesRouteImport.update({
+  id: '/love-notes',
+  path: '/love-notes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MyOrdersRoute = MyOrdersRouteImport.update({
+  id: '/my-orders',
+  path: '/my-orders',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const NewArrivalsRoute = NewArrivalsRouteImport.update({
   id: '/new-arrivals',
   path: '/new-arrivals',
@@ -58,6 +72,16 @@ const SareesRoute = SareesRouteImport.update({
   path: '/sarees',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StyleReelsRoute = StyleReelsRouteImport.update({
+  id: '/style-reels',
+  path: '/style-reels',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TrendTalksRoute = TrendTalksRouteImport.update({
+  id: '/trend-talks',
+  path: '/trend-talks',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -65,9 +89,13 @@ export interface FileRoutesByFullPath {
   '/checkout': typeof CheckoutRoute
   '/contact': typeof ContactRoute
   '/kurtis': typeof KurtisRoute
+  '/love-notes': typeof LoveNotesRoute
+  '/my-orders': typeof MyOrdersRoute
   '/new-arrivals': typeof NewArrivalsRoute
   '/offers': typeof OffersRoute
   '/sarees': typeof SareesRoute
+  '/style-reels': typeof StyleReelsRoute
+  '/trend-talks': typeof TrendTalksRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -75,9 +103,13 @@ export interface FileRoutesByTo {
   '/checkout': typeof CheckoutRoute
   '/contact': typeof ContactRoute
   '/kurtis': typeof KurtisRoute
+  '/love-notes': typeof LoveNotesRoute
+  '/my-orders': typeof MyOrdersRoute
   '/new-arrivals': typeof NewArrivalsRoute
   '/offers': typeof OffersRoute
   '/sarees': typeof SareesRoute
+  '/style-reels': typeof StyleReelsRoute
+  '/trend-talks': typeof TrendTalksRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -86,9 +118,13 @@ export interface FileRoutesById {
   '/checkout': typeof CheckoutRoute
   '/contact': typeof ContactRoute
   '/kurtis': typeof KurtisRoute
+  '/love-notes': typeof LoveNotesRoute
+  '/my-orders': typeof MyOrdersRoute
   '/new-arrivals': typeof NewArrivalsRoute
   '/offers': typeof OffersRoute
   '/sarees': typeof SareesRoute
+  '/style-reels': typeof StyleReelsRoute
+  '/trend-talks': typeof TrendTalksRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -98,9 +134,13 @@ export interface FileRouteTypes {
     | '/checkout'
     | '/contact'
     | '/kurtis'
+    | '/love-notes'
+    | '/my-orders'
     | '/new-arrivals'
     | '/offers'
     | '/sarees'
+    | '/style-reels'
+    | '/trend-talks'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -108,9 +148,13 @@ export interface FileRouteTypes {
     | '/checkout'
     | '/contact'
     | '/kurtis'
+    | '/love-notes'
+    | '/my-orders'
     | '/new-arrivals'
     | '/offers'
     | '/sarees'
+    | '/style-reels'
+    | '/trend-talks'
   id:
     | '__root__'
     | '/'
@@ -118,9 +162,13 @@ export interface FileRouteTypes {
     | '/checkout'
     | '/contact'
     | '/kurtis'
+    | '/love-notes'
+    | '/my-orders'
     | '/new-arrivals'
     | '/offers'
     | '/sarees'
+    | '/style-reels'
+    | '/trend-talks'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -129,9 +177,13 @@ export interface RootRouteChildren {
   CheckoutRoute: typeof CheckoutRoute
   ContactRoute: typeof ContactRoute
   KurtisRoute: typeof KurtisRoute
+  LoveNotesRoute: typeof LoveNotesRoute
+  MyOrdersRoute: typeof MyOrdersRoute
   NewArrivalsRoute: typeof NewArrivalsRoute
   OffersRoute: typeof OffersRoute
   SareesRoute: typeof SareesRoute
+  StyleReelsRoute: typeof StyleReelsRoute
+  TrendTalksRoute: typeof TrendTalksRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -171,6 +223,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof KurtisRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/love-notes': {
+      id: '/love-notes'
+      path: '/love-notes'
+      fullPath: '/love-notes'
+      preLoaderRoute: typeof LoveNotesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/my-orders': {
+      id: '/my-orders'
+      path: '/my-orders'
+      fullPath: '/my-orders'
+      preLoaderRoute: typeof MyOrdersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/new-arrivals': {
       id: '/new-arrivals'
       path: '/new-arrivals'
@@ -192,6 +258,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SareesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/style-reels': {
+      id: '/style-reels'
+      path: '/style-reels'
+      fullPath: '/style-reels'
+      preLoaderRoute: typeof StyleReelsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/trend-talks': {
+      id: '/trend-talks'
+      path: '/trend-talks'
+      fullPath: '/trend-talks'
+      preLoaderRoute: typeof TrendTalksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -201,9 +281,13 @@ const rootRouteChildren: RootRouteChildren = {
   CheckoutRoute: CheckoutRoute,
   ContactRoute: ContactRoute,
   KurtisRoute: KurtisRoute,
+  LoveNotesRoute: LoveNotesRoute,
+  MyOrdersRoute: MyOrdersRoute,
   NewArrivalsRoute: NewArrivalsRoute,
   OffersRoute: OffersRoute,
   SareesRoute: SareesRoute,
+  StyleReelsRoute: StyleReelsRoute,
+  TrendTalksRoute: TrendTalksRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

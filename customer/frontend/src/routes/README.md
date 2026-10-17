@@ -10,12 +10,21 @@ is `src/routes/__root.tsx`.
 | File | URL |
 | --- | --- |
 | `index.tsx` | `/` |
-| `about.tsx` | `/about` |
-| `users/index.tsx` | `/users` |
-| `users/$id.tsx` | `/users/:id` (dynamic — bare `$`, no curly braces) |
-| `posts/{-$category}.tsx` | `/posts/:category?` (optional segment) |
-| `files/$.tsx` | `/files/*` (splat — read via `_splat` param, never `*`) |
-| `_layout.tsx` | layout route (renders children via `<Outlet />`) |
+| `new-arrivals.tsx` | `/new-arrivals` |
+| `sarees.tsx`, `kurtis.tsx` | product collections |
+| `style-reels.tsx` | `/style-reels` |
+| `love-notes.tsx` | `/love-notes` |
+| `contact.tsx` | `/contact` |
+| `checkout.tsx` | `/checkout` |
+| `about.tsx`, `offers.tsx` | legacy paths that redirect to `/` |
 | `__root.tsx` | app shell — wraps every page; preserve `<Outlet />` |
 
 `routeTree.gen.ts` is auto-generated. Don't edit it by hand.
+
+Community content is read from `GET /api/reels` (`{ reels: ApiReel[] }`) and
+`GET /api/reviews` (`{ reviews: ApiReview[], averageRating, total }`). Reels
+contain `title`, `instagramUrl`, `thumbnailText`, `order`, and `isActive`.
+Reviews contain the populated customer and optional product, `rating`, `text`,
+and moderation `status`; the customer API returns approved reviews only.
+Authenticated customers submit reviews with `POST /api/reviews`; new reviews
+remain pending until an administrator approves them.

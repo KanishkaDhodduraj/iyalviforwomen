@@ -1,11 +1,9 @@
 import { app } from "./app.js";
 import { connectDatabase } from "./config/db.js";
 import { env } from "./config/env.js";
-import { startPromotionExpiryScheduler } from "./services/promotionExpiry.js";
 
 try {
   await connectDatabase();
-  startPromotionExpiryScheduler();
   const onListening = () => console.info(`Admin API listening on port ${env.PORT}`);
   if (env.NODE_ENV === "development") {
     app.listen(env.PORT, "127.0.0.1", onListening);

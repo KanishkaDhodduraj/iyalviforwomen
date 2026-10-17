@@ -11,6 +11,8 @@ import { Discount } from "./models/Discount.js";
 import { Order } from "./models/Order.js";
 import { User } from "./models/User.js";
 import { ContactMessage } from "./models/ContactMessage.js";
+import { Setting } from "./models/Setting.js";
+import { Reel } from "./models/Reel.js";
 
 async function getCsrfCredentials() {
   const response = await request(app).get("/api/auth/csrf");
@@ -37,6 +39,12 @@ describe("API security boundary", () => {
     expect(response.headers["access-control-allow-credentials"]).toBe("true");
   });
 
+  it("exposes only payment methods enabled by the server demo setting", async () => {
+    const response = await request(app).get("/api/payment-options");
+    expect(response.status).toBe(200);
+    expect(response.body.methods).toEqual(["COD"]);
+  });
+
   it("rejects unknown query fields and disallowed browser origins", async () => {
     const unknownQuery = await request(app).get("/api/health?unexpected=value");
     expect(unknownQuery.status).toBe(400);
@@ -54,6 +62,7 @@ describe("API security boundary", () => {
       slug: "test-saree",
       name: "Test saree",
       category: "saree",
+      isNewArrival: true,
       price: 1000,
       mrp: 1200,
       stock: 7,
@@ -116,6 +125,8 @@ describe("API security boundary", () => {
       expect.objectContaining({ isActive: true, archived: { $ne: true } }),
     );
     expect(response.body.products[0]).not.toHaveProperty("costPrice");
+    expect(response.body.products[0]).not.toHaveProperty("stock");
+    expect(response.body.products[0]).toMatchObject({ inStock: true, lowStock: null });
     expect(response.body.products[0].images[0]).toEqual({
       url: "/uploads/saree.webp",
       alt: "Saree",
@@ -123,10 +134,17 @@ describe("API security boundary", () => {
     });
     expect(response.body.products[0].images[0]).not.toHaveProperty("key");
     expect(response.body.products[0].sizes).toEqual(["Free Size"]);
-    expect(response.body.products[0]).toMatchObject({ price: 900, originalPrice: 1200 });
+    expect(response.body.products[0]).toMatchObject({ price: 1080, originalPrice: 1200 });
     expect(response.body.products[0].offerEndsAt).toBe(flashSaleEndsAt.toISOString());
     expect(response.body.products[0]).not.toHaveProperty("archived");
     expect(response.body.products[0]).not.toHaveProperty("createdBy");
+
+    const newArrivals = await request(app).get("/api/products?isNewArrival=true&sort=newest");
+    expect(newArrivals.status).toBe(200);
+    expect(findProducts).toHaveBeenCalledWith(
+      expect.objectContaining({ isNewArrival: true, isActive: true }),
+    );
+    expect(newArrivals.body.products[0].isNewArrival).toBe(true);
 
     const tooMany = await request(app).get("/api/products?limit=51");
     expect(tooMany.status).toBe(400);
@@ -177,6 +195,11 @@ describe("API security boundary", () => {
       exec: async () => [],
     };
     vi.spyOn(Discount, "find").mockReturnValue(discountQuery as never);
+    vi.spyOn(Setting, "findById").mockReturnValue({
+      select: () => ({
+        lean: () => ({ exec: async () => null }),
+      }),
+    } as never);
     vi.spyOn(Product, "find").mockReturnValue({
       exec: async () => [
         {
@@ -229,7 +252,7 @@ describe("API security boundary", () => {
     expect((await request(app).get("/api/addresses")).status).toBe(401);
 
     const csrf = await getCsrfCredentials();
-    for (const path of ["/api/coupons/validate", "/api/offers/spin"]) {
+    for (const path of ["/api/coupons/validate"]) {
       const response = await request(app)
         .post(path)
         .set("Cookie", csrf.cookies)
@@ -239,6 +262,16 @@ describe("API security boundary", () => {
     }
   });
 
+  it("does not expose the removed spin-wheel endpoint", async () => {
+    const csrf = await getCsrfCredentials();
+    const response = await request(app)
+      .post("/api/offers/spin")
+      .set("Cookie", csrf.cookies)
+      .set("x-csrf-token", csrf.token)
+      .send({});
+    expect(response.status).toBe(404);
+  });
+
   it("keeps admin-only order notes hidden and defaults contact workflow flags", () => {
     expect(Order.schema.path("adminNotes")?.options.select).toBe(false);
     const message = new ContactMessage({
@@ -246,6 +279,9 @@ describe("API security boundary", () => {
       email: "customer@example.com",
       message: "A question",
     });
+    expect(message.status).toBe("new");
+    expect(message.adminNote).toBe("");
+    expect(message.readAt).toBeUndefined();
     expect(message.isRead).toBe(false);
     expect(message.isResolved).toBe(false);
     expect(ContactMessage.schema.path("isRead")?.options.index).toBe(true);
@@ -359,6 +395,7 @@ describe("API security boundary", () => {
       name: "Test customer",
       email: "customer@example.com",
       message: "Please help with an order.",
+      status: "new",
     });
 
     const invalid = await request(app)
@@ -372,6 +409,34 @@ describe("API security boundary", () => {
         unexpected: true,
       });
     expect(invalid.status).toBe(400);
+  });
+
+  it("lists only active reels in their configured order", async () => {
+    const reels = [
+      {
+        title: "Summer",
+        shortcode: "summer_1",
+        instagramUrl: "https://www.instagram.com/reel/summer_1/",
+        isActive: true,
+      },
+    ];
+    const query = {
+      sort: vi.fn(() => query),
+      lean: vi.fn(() => query),
+      exec: vi.fn(async () => reels),
+    };
+    const find = vi.spyOn(Reel, "find").mockReturnValue(query as never);
+
+    const response = await request(app).get("/api/reels");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ reels });
+    expect(find).toHaveBeenCalledWith({ isActive: true });
+    expect(query.sort).toHaveBeenCalledWith({ order: 1, createdAt: -1 });
+  });
+
+  it("does not expose the removed public reviews API", async () => {
+    expect((await request(app).get("/api/reviews")).status).toBe(404);
   });
 
   it("returns 404 when an authenticated user requests another user's order", async () => {

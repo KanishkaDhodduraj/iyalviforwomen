@@ -4,10 +4,16 @@ import sharp from "sharp";
 import {
   imageStorage,
   InvalidImageError,
+  shouldRejectImageUploadInProduction,
   type StoredImage,
 } from "./imageStorage.js";
 
 describe("local product image storage", () => {
+  it("disables local uploads in production deployments", () => {
+    expect(shouldRejectImageUploadInProduction("production")).toBe(true);
+    expect(shouldRejectImageUploadInProduction("development")).toBe(false);
+  });
+
   it("rejects content with a fake image extension and invalid magic bytes", async () => {
     const fakeJpegBuffer = Buffer.from("not an image");
     await expect(imageStorage.save(fakeJpegBuffer, "fake.jpg")).rejects.toBeInstanceOf(

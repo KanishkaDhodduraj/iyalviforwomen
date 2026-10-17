@@ -19,6 +19,7 @@ const jsonResponse = (status: number, body?: unknown) =>
 describe("API client", () => {
   beforeEach(() => {
     api.clearCsrf();
+    api.clearPublicReadCache();
     vi.restoreAllMocks();
   });
 
@@ -81,13 +82,53 @@ describe("API client", () => {
     });
   });
 
-  it("maps legacy locally stored cart ids to their seeded server products", () => {
+  it("does not retry rate-limited requests and shows the friendly wait message", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(429, { message: "Limited" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.get("/products")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 429,
+      message: "Too many requests, please wait a moment",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("caches and deduplicates public product and reel reads for 60 seconds", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { products: [] }))
+      .mockResolvedValueOnce(jsonResponse(200, { products: [{ _id: "fresh" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [first, concurrent] = await Promise.all([
+      api.get("/products?sort=newest"),
+      api.get("/products?sort=newest"),
+    ]);
+    const cached = await api.get("/products?sort=newest");
+
+    expect(first).toBe(concurrent);
+    expect(cached).toBe(first);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 60_001);
+    try {
+      await expect(api.get("/products?sort=newest")).resolves.toEqual({
+        products: [{ _id: "fresh" }],
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("maps cart ids only to products returned by the server", () => {
     const seededProduct = {
       _id: "507f1f77bcf86cd799439011",
       slug: "iy-001-mayil-peacock-teal-saree",
     } as ApiProduct;
 
-    expect(apiProductForCartItem("iy-001", [seededProduct])).toBe(seededProduct);
     expect(apiProductForCartItem(seededProduct._id, [seededProduct])).toBe(seededProduct);
     expect(apiProductForCartItem("iy-010", [seededProduct])).toBeUndefined();
   });
@@ -100,7 +141,6 @@ describe("API client", () => {
       category: "saree",
       subCategory: "Silk",
       fabric: "Silk",
-      occasion: "Wedding",
       colors: ["Teal"],
       sizes: ["Free Size"],
       price: 720,
@@ -146,7 +186,11 @@ describe("API client", () => {
     const result = await getAllProducts(new URLSearchParams({ category: "saree" }));
 
     expect(result.map((product) => product._id)).toEqual(["one", "two"]);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/products?category=saree&page=1&limit=50");
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/products?category=saree&page=2&limit=50");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/products?category=saree&sort=newest&page=1&limit=50",
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "/api/products?category=saree&sort=newest&page=2&limit=50",
+    );
   });
 });

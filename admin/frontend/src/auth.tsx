@@ -4,36 +4,24 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { ArrowRight, LockKeyhole } from "lucide-react";
-import { ApiError, authApi, loginInputSchema, type AdminUser } from "./api";
+import { ApiError, authApi, loginInputSchema, signedInThisSessionKey, type AdminUser } from "./api";
 
 export const authKey = ["auth", "me"] as const;
-export const localAutoLoginDisabledKey = "admin-local-auto-login-disabled";
 export type LoginFields = z.infer<typeof loginInputSchema>;
 
 export function useAdmin() {
   return useQuery({
     queryKey: authKey,
-    queryFn: async () => {
-      try {
-        return (await authApi.me()).admin;
-      } catch (error) {
-        if (
-          !import.meta.env.DEV ||
-          sessionStorage.getItem(localAutoLoginDisabledKey) === "true" ||
-          !(error instanceof ApiError) ||
-          error.status !== 401
-        ) throw error;
-        await authApi.devLogin();
-        return (await authApi.me()).admin;
-      }
-    },
+    queryFn: async () => (await authApi.me()).admin,
     retry: false,
     staleTime: 60_000,
+    enabled: sessionStorage.getItem(signedInThisSessionKey) === "true",
   });
 }
 
 export function ProtectedRoute() {
   const auth = useAdmin();
+  if (sessionStorage.getItem(signedInThisSessionKey) !== "true") return <Navigate to="/login" replace />;
   if (auth.isLoading) return <div className="auth-loading"><span className="spinner" />Verifying secure session…</div>;
   if (auth.isError || !auth.data) {
     const connectionIssue = auth.error instanceof ApiError && auth.error.status === undefined ? auth.error.message : undefined;
@@ -54,16 +42,19 @@ export function LoginPage() {
     form.clearErrors("root");
     try {
       const result = await authApi.login(values.email, values.password);
-      sessionStorage.removeItem(localAutoLoginDisabledKey);
+      sessionStorage.setItem(signedInThisSessionKey, "true");
       queryClient.setQueryData<AdminUser>(authKey, result.admin);
-      await navigate("/", { replace: true });
+      await navigate("/dashboard", { replace: true });
     } catch (error) {
       form.setError("root", { message: error instanceof Error ? error.message : "Sign-in failed. Please try again." });
     }
   });
-  if (auth.isLoading) return <div className="auth-loading"><span className="spinner" />Verifying secure session…</div>;
-  if (auth.data) return <Navigate to="/" replace />;
-  const authIssue = auth.isError && auth.error instanceof Error ? auth.error.message : undefined;
+  const hasSession = sessionStorage.getItem(signedInThisSessionKey) === "true";
+  if (hasSession && auth.isLoading) return <div className="auth-loading"><span className="spinner" />Verifying secure session…</div>;
+  if (hasSession && auth.data) return <Navigate to="/dashboard" replace />;
+  const authIssue = auth.isError && auth.error instanceof ApiError && auth.error.status === undefined
+    ? auth.error.message
+    : undefined;
   return (
     <main className="login-shell">
       <form className="login-card" onSubmit={onSubmit}>

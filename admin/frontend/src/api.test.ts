@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AdminApiClient } from "./api";
+import { AdminApiClient, signedInThisSessionKey } from "./api";
 
 const ok = (data: unknown, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -56,5 +56,16 @@ describe("AdminApiClient", () => {
   it("returns a helpful offline message when the API cannot be reached", async () => {
     const client = new AdminApiClient(vi.fn<typeof fetch>().mockRejectedValue(new TypeError("Network error")));
     await expect(client.get("/dashboard")).rejects.toThrow(/offline or unreachable/i);
+  });
+
+  it("clears the browser-session sign-in flag after an unauthorized response", async () => {
+    sessionStorage.setItem(signedInThisSessionKey, "true");
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(ok({ error: "Authentication required" }, 401))
+      .mockResolvedValueOnce(ok({ error: "Authentication required" }, 401));
+    const client = new AdminApiClient(fetcher);
+
+    await expect(client.get("/settings/profile")).rejects.toThrow("Authentication required");
+    expect(sessionStorage.getItem(signedInThisSessionKey)).toBeNull();
   });
 });

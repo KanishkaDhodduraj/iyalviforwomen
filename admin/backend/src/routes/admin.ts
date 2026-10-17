@@ -5,7 +5,6 @@ import { requireAdmin, requireCsrf, requireRole } from "../middleware/auth.js";
 import { writeAudit } from "../middleware/audit.js";
 import { Address } from "../models/Address.js";
 import { AuditLog } from "../models/AuditLog.js";
-import { ContactMessage } from "../models/ContactMessage.js";
 import { Coupon } from "../models/Coupon.js";
 import { CouponRedemption } from "../models/CouponRedemption.js";
 import { Discount } from "../models/Discount.js";
@@ -32,23 +31,39 @@ import {
 import { productInputSchema, productUpdateSchema, productUpdateCandidateSchema } from "../schemas/product.js";
 import { deleteImageAssetsWhenUnused } from "../services/imageStorage.js";
 import { generateUniqueCouponCodes } from "../services/couponCodes.js";
+import { productSlugBase } from "../services/productSlug.js";
 import { previewDiscounts, serializeDiscount, type ManagedDiscount } from "../services/discountManagement.js";
+import { messagesRouter } from "./messages.js";
+import { reelsRouter } from "./reels.js";
+import { reviewsRouter } from "./reviews.js";
 
 export const adminRouter = Router();
 const idSchema = z.string().regex(/^[a-f\d]{24}$/i);
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+async function uniqueProductSlug(name: string, excludedId?: string) {
+  const base = productSlugBase(name);
+  let slug = base;
+  let suffix = 2;
+  while (await Product.exists({ slug, ...(excludedId && { _id: { $ne: excludedId } }) })) {
+    slug = `${base.slice(0, 150 - String(suffix).length)}-${suffix}`;
+    suffix += 1;
+  }
+  return slug;
+}
 const pageSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
 }).strict();
 const statusBody = z.object({
-  status: z.enum(["packed", "shipped", "delivered"]),
+  status: z.enum(["packed", "shipped", "out_for_delivery", "delivered"]),
+  courier: z.string().trim().max(120).optional(),
+  trackingNumber: z.string().trim().max(120).optional(),
   note: z.string().trim().max(1000).optional(),
 }).strict();
 const orderListQuery = pageSchema.extend({
-  status: z.enum(["placed", "packed", "shipped", "delivered", "cancelled"]).optional(),
+  status: z.enum(["placed", "packed", "shipped", "out_for_delivery", "delivered", "cancelled"]).optional(),
   paymentStatus: z.enum(["pending", "paid", "failed", "refunded"]).optional(),
-  paymentMethod: z.enum(["COD", "UPI", "CARD", "NET_BANKING", "RAZORPAY"]).optional(),
+  paymentMethod: z.enum(["COD", "UPI", "CARD", "NETBANKING"]).optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
   customerId: idSchema.optional(),
@@ -78,12 +93,13 @@ const customerListQuery = pageSchema.extend({
 }).strict();
 const blockBody = z.object({ isBlocked: z.boolean() }).strict();
 
-function couponStatus(coupon: { isActive: boolean; expiresAt: Date | string }, now = new Date()) {
+function couponStatus(coupon: { isActive: boolean; startsAt?: Date | string; expiresAt: Date | string }, now = new Date()) {
   if (new Date(coupon.expiresAt).getTime() <= now.getTime()) return "expired" as const;
+  if (coupon.startsAt && new Date(coupon.startsAt).getTime() > now.getTime()) return "scheduled" as const;
   return coupon.isActive ? "active" as const : "inactive" as const;
 }
 
-function serializeCoupon<T extends { isActive: boolean; expiresAt: Date | string }>(coupon: T, now = new Date()) {
+function serializeCoupon<T extends { isActive: boolean; startsAt?: Date | string; expiresAt: Date | string }>(coupon: T, now = new Date()) {
   return { ...coupon, status: couponStatus(coupon, now) };
 }
 
@@ -105,7 +121,10 @@ async function flatDiscountValidationMessage(input: {
   }
   const matchingProduct = await Product.findOne(filter).select("_id").lean().exec();
   if (!matchingProduct && input.scope === "product") return "No products match the discount targets";
-  const underpricedProduct = await Product.findOne({ ...filter, price: { $lte: input.value } }).select("_id").lean().exec();
+  const underpricedProduct = await Product.findOne({
+    ...filter,
+    $expr: { $lte: [{ $ifNull: ["$mrp", "$price"] }, input.value] },
+  }).select("_id").lean().exec();
   if (underpricedProduct) return "Flat discount must be below every matching product price";
   return undefined;
 }
@@ -117,10 +136,6 @@ const discountPreviewBody = z.object({
   productId: z.string().trim().min(1).max(160),
   asOf: utcDateTimeSchema.optional(),
 }).strict();
-const contactUpdateBody = z.object({
-  isRead: z.boolean().optional(),
-  isResolved: z.boolean().optional(),
-}).strict().refine((value) => Object.keys(value).length > 0);
 const refundBody = z.object({
   amount: z.number().finite().positive(),
   note: z.string().trim().min(1).max(1000),
@@ -130,7 +145,6 @@ const productListQuery = pageSchema.extend({
   category: z.enum(["saree", "kurti"]).optional(),
   subCategory: z.string().trim().max(100).optional(),
   fabric: z.string().trim().max(100).optional(),
-  occasion: z.string().trim().max(100).optional(),
   isActive: z.enum(["true", "false"]).optional(),
   isFeatured: z.enum(["true", "false"]).optional(),
   archived: z.enum(["true", "false"]).optional(),
@@ -143,7 +157,16 @@ const productListQuery = pageSchema.extend({
     context.addIssue({ code: "custom", message: "Invalid price range", path: ["maxPrice"] });
   }
 });
-const duplicateProductBody = z.object({ slug: z.string().trim().min(1).max(160).regex(/^[a-z0-9-]+$/).optional(), sku: z.string().trim().min(1).max(80).regex(/^[A-Za-z0-9_-]+$/).optional() }).strict();
+const duplicateProductBody = z.object({}).strict();
+const linkedProductDiscountBody = z.object({
+  type: z.enum(["percent", "flat"]),
+  value: z.number().finite().positive(),
+  startsAt: z.coerce.date(),
+  endsAt: z.coerce.date(),
+}).strict().superRefine((value, context) => {
+  if (value.endsAt <= value.startsAt) context.addIssue({ code: "custom", message: "End time must be after start time", path: ["endsAt"] });
+  if (value.type === "percent" && (value.value < 1 || value.value > 90)) context.addIssue({ code: "custom", message: "Percentage must be between 1 and 90", path: ["value"] });
+});
 const stockUpdateBody = z.object({
   size: z.string().trim().min(1).max(40),
   stock: z.number().int().min(0).max(1_000_000),
@@ -155,15 +178,23 @@ const bulkProductBody = z.object({
 }).strict().refine((value) => (value.action === "category") === (value.category !== undefined), {
   message: "Category is required only for category changes",
 });
-const messageListQuery = pageSchema.extend({
-  isRead: z.enum(["true", "false"]).optional(),
-  isResolved: z.enum(["true", "false"]).optional(),
-}).strict();
-const paymentListQuery = pageSchema.extend({
+const paymentListQuery = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(25),
   status: z.enum(["pending", "paid", "failed", "refunded"]).optional(),
-  method: z.enum(["COD", "UPI", "CARD", "NET_BANKING", "RAZORPAY"]).optional(),
-}).strict();
+  method: z.enum(["COD", "UPI", "CARD", "NETBANKING", "NET_BANKING", "RAZORPAY"]).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  search: z.string().trim().min(1).max(120).optional(),
+}).strict().superRefine((value, context) => {
+  if (value.from && value.to && value.from > value.to) {
+    context.addIssue({ code: "custom", message: "Invalid payment date range", path: ["to"] });
+  }
+});
 adminRouter.use(requireAdmin);
+adminRouter.use("/messages", messagesRouter);
+adminRouter.use("/reels", reelsRouter);
+adminRouter.use("/reviews", reviewsRouter);
 
 adminRouter.get("/dashboard", emptyQuery, emptyBody, requireRole("superadmin", "manager"), async (_request, response) => {
   const now = new Date();
@@ -238,7 +269,7 @@ adminRouter.get("/dashboard", emptyQuery, emptyBody, requireRole("superadmin", "
 
 adminRouter.get("/products", emptyBody, requireRole("superadmin", "manager"), async (request, response) => {
   const {
-    page, limit, search, category, subCategory, fabric, occasion,
+    page, limit, search, category, subCategory, fabric,
     isActive, isFeatured, archived, minPrice, maxPrice, sortBy, sortOrder,
   } = productListQuery.parse(request.query);
   const safeSearch = search && escapeRegex(search);
@@ -246,7 +277,6 @@ adminRouter.get("/products", emptyBody, requireRole("superadmin", "manager"), as
     ...(category && { category }),
     ...(subCategory && { subCategory: new RegExp(`^${escapeRegex(subCategory)}$`, "i") }),
     ...(fabric && { fabric: new RegExp(`^${escapeRegex(fabric)}$`, "i") }),
-    ...(occasion && { occasion: new RegExp(`^${escapeRegex(occasion)}$`, "i") }),
     ...(isActive !== undefined && { isActive: isActive === "true" }),
     ...(isFeatured !== undefined && { isFeatured: isFeatured === "true" }),
     ...(archived !== undefined ? { archived: archived === "true" } : { archived: false }),
@@ -288,9 +318,67 @@ adminRouter.patch("/products/bulk", emptyQuery, requireCsrf, requireRole("supera
   await writeAudit(request, `bulk_${action}`, "Product", `${result.modifiedCount} products`);
   response.json({ matched: result.matchedCount, modified: result.modifiedCount });
 });
+adminRouter.get("/products/:id/discount", emptyBody, emptyQuery, requireRole("superadmin", "manager"), async (request, response) => {
+  const id = idSchema.parse(request.params.id);
+  const product = await Product.findById(id).select("slug").lean().exec();
+  if (!product) return response.status(404).json({ error: "Product not found" });
+  const item = await Discount.findOne({
+    scope: "product",
+    targets: { $in: [id, product.slug] },
+    $expr: { $eq: [{ $size: { $ifNull: ["$targets", []] } }, 1] },
+  }).sort({ updatedAt: -1 }).lean().exec();
+  response.json({ item });
+});
+adminRouter.patch("/products/:id/discount", emptyQuery, requireCsrf, requireRole("superadmin", "manager"), async (request, response) => {
+  const id = idSchema.parse(request.params.id);
+  const input = linkedProductDiscountBody.parse(request.body);
+  const product = await Product.findById(id).select("name slug mrp").lean().exec();
+  if (!product) return response.status(404).json({ error: "Product not found" });
+  if (input.type === "flat" && input.value >= product.mrp) {
+    return response.status(400).json({ error: "Flat discount must be below the product MRP" });
+  }
+  const existing = await Discount.findOne({
+    scope: "product",
+    targets: { $in: [id, product.slug] },
+    $expr: { $eq: [{ $size: { $ifNull: ["$targets", []] } }, 1] },
+  }).sort({ updatedAt: -1 }).exec();
+  const values = {
+    name: `${product.name.slice(0, 135)} discount`,
+    scope: "product" as const,
+    targets: [id],
+    ...input,
+    isActive: true,
+    isFlashSale: false,
+    priority: existing?.priority ?? 0,
+    stackable: false,
+  };
+  const validated = discountInputSchema.parse(values);
+  const flatError = await flatDiscountValidationMessage(validated);
+  if (flatError) return response.status(400).json({ error: flatError });
+  const item = existing
+    ? await Discount.findByIdAndUpdate(existing._id, validated, { new: true, runValidators: true }).lean().exec()
+    : await Discount.create({ ...validated, createdBy: request.admin!.id });
+  if (!item) return response.status(404).json({ error: "Discount not found" });
+  await writeAudit(request, existing ? "update" : "create", "Discount", String(item._id));
+  response.json({ item: serializeDiscount(item as ManagedDiscount) });
+});
 adminRouter.post("/products", emptyQuery, requireCsrf, requireRole("superadmin", "manager"), async (request, response) => {
   const input = productInputSchema.parse(request.body);
-  const item = await Product.create({ ...input, createdBy: request.admin!.id });
+  let item;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      item = await Product.create({
+        ...input,
+        slug: await uniqueProductSlug(input.name),
+        price: input.mrp,
+        createdBy: request.admin!.id,
+      });
+      break;
+    } catch (error) {
+      if (!isDuplicateKeyError(error) || attempt === 2) throw error;
+    }
+  }
+  if (!item) throw new Error("Product could not be created");
   await writeAudit(request, "create", "Product", String(item._id));
   response.status(201).json({ item });
 });
@@ -305,15 +393,16 @@ adminRouter.patch("/products/:id", emptyQuery, requireCsrf, requireRole("superad
     thumbnailKey: image.thumbnailKey,
   }));
   product.set(input);
+  product.slug = await uniqueProductSlug(product.name, id);
+  product.price = product.mrp;
   const parsed = productUpdateCandidateSchema.parse({
     slug: product.slug,
     sku: product.sku,
     name: product.name,
     description: product.description,
-    category: product.category,
+    category: product.category ?? "",
     subCategory: product.subCategory,
     fabric: product.fabric,
-    occasion: product.occasion,
     colors: product.colors,
     sizes: product.sizes.map(({ size, stock }) => ({ size, stock })),
     price: product.price,
@@ -331,10 +420,17 @@ adminRouter.patch("/products/:id", emptyQuery, requireCsrf, requireRole("superad
     tags: product.tags,
     isActive: product.isActive,
     isFeatured: product.isFeatured,
+    isNewArrival: product.isNewArrival,
     archived: product.archived,
   });
   product.set(parsed);
-  await product.save();
+  try {
+    await product.save();
+  } catch (error) {
+    if (!isDuplicateKeyError(error)) throw error;
+    product.slug = await uniqueProductSlug(product.name, id);
+    await product.save();
+  }
   const item = await Product.findById(id).select("+costPrice").lean().exec();
   await writeAudit(request, "update", "Product", id);
   const keptKeys = new Set(product.images.map((image) => image.key).filter(Boolean));
@@ -353,27 +449,27 @@ adminRouter.delete("/products/:id", emptyBody, emptyQuery, requireCsrf, requireR
 });
 adminRouter.post("/products/:id/duplicate", emptyQuery, requireCsrf, requireRole("superadmin", "manager"), async (request, response) => {
   const id = idSchema.parse(request.params.id);
-  const input = duplicateProductBody.parse(request.body ?? {});
+  duplicateProductBody.parse(request.body ?? {});
   const original = await Product.findById(id).select("+costPrice").lean().exec();
   if (!original) return response.status(404).json({ error: "Product not found" });
   const duplicate = await Product.create({
-    slug: input.slug ?? `${original.slug}-copy-${new mongoose.Types.ObjectId().toString().slice(-6)}`,
-    ...(input.sku && { sku: input.sku }),
     name: `${original.name.slice(0, 190)} (Copy)`,
     description: original.description,
     category: original.category,
     subCategory: original.subCategory,
     fabric: original.fabric,
-    occasion: original.occasion,
     colors: original.colors,
     sizes: original.sizes,
-    price: original.price,
+    slug: await uniqueProductSlug(`${original.name} Copy`),
+    price: original.mrp,
     mrp: original.mrp,
+    stock: original.stock,
     ...(original.costPrice !== undefined && { costPrice: original.costPrice }),
     images: original.images,
     tags: original.tags,
     isActive: false,
     isFeatured: false,
+    isNewArrival: false,
     archived: false,
     createdBy: request.admin!.id,
   });
@@ -441,7 +537,7 @@ adminRouter.get("/orders/:id", emptyBody, emptyQuery, requireRole("superadmin", 
 });
 adminRouter.patch("/orders/:id/status", emptyQuery, requireCsrf, requireRole("superadmin", "manager"), async (request, response) => {
   const id = idSchema.parse(request.params.id);
-  const { status, note } = statusBody.parse(request.body);
+  const { status, note, courier, trackingNumber } = statusBody.parse(request.body);
   const order = await Order.findById(id).exec();
   if (!order) return response.status(404).json({ error: "Order not found" });
   if (!canTransitionOrderStatus(order.orderStatus, status)) {
@@ -452,7 +548,9 @@ adminRouter.patch("/orders/:id/status", emptyQuery, requireCsrf, requireRole("su
     {
       $set: {
         orderStatus: status,
-        ...(status === "delivered" && order.paymentMethod === "COD" && { paymentStatus: "paid" }),
+        ...(status === "delivered" && order.paymentMethod === "COD" && order.paymentStatus === "pending" && { paymentStatus: "paid" }),
+        ...(courier !== undefined && { courier }),
+        ...(trackingNumber !== undefined && { trackingNumber }),
       },
       $push: {
         statusHistory: {
@@ -501,6 +599,10 @@ adminRouter.post("/orders/:id/cancel", emptyQuery, requireCsrf, requireRole("sup
         for (const product of products) {
           const expectedSizes = quantities.get(String(product._id))!;
           for (const [size, qty] of expectedSizes) {
+            if (product.sizes.length === 0 && size === "One Size") {
+              product.stock += qty;
+              continue;
+            }
             const variant = product.sizes.find((item) => item.size === size);
             if (!variant) throw Object.assign(new Error("ORDER_SIZE_MISSING"), { status: 409 });
             variant.stock += qty;
@@ -654,15 +756,30 @@ adminRouter.patch("/customers/:id/block", emptyQuery, requireCsrf, requireRole("
 });
 
 adminRouter.get("/payments", emptyBody, requireRole("superadmin", "manager"), async (request, response) => {
-  const { page, limit, status, method } = paymentListQuery.parse(request.query);
-  const filter = {
+  const { page, limit, status, method, from, to, search } = paymentListQuery.parse(request.query);
+  const safeSearch = search && escapeRegex(search);
+  const matchedCustomers = safeSearch
+    ? await User.find({
+        role: "user",
+        $or: [
+          { name: { $regex: safeSearch, $options: "i" } },
+          { email: { $regex: safeSearch, $options: "i" } },
+        ],
+      }).select("_id").lean().exec()
+    : [];
+  const filter: Record<string, unknown> = {
     ...(status && { paymentStatus: status }),
     ...(method && { paymentMethod: method }),
+    ...((from || to) && { createdAt: { ...(from && { $gte: from }), ...(to && { $lte: to }) } }),
+    ...(safeSearch && { $or: [
+      ...(idSchema.safeParse(search).success ? [{ _id: search }] : []),
+      ...(matchedCustomers.length ? [{ user: { $in: matchedCustomers.map(({ _id }) => _id) } }] : []),
+    ] }),
   };
   const [items, total, totalsByMethod, pendingCod] = await Promise.all([
     Order.find(filter).select("user total paymentMethod paymentStatus orderStatus razorpayOrderId razorpayPaymentId refundStatus refundAmount refundedAt createdAt updatedAt").populate("user", "name email").sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean().exec(),
     Order.countDocuments(filter).exec(),
-    Order.aggregate([{
+    Order.aggregate([{ $match: filter }, {
       $group: {
         _id: "$paymentMethod",
         orderCount: { $sum: 1 },
@@ -672,7 +789,7 @@ adminRouter.get("/payments", emptyBody, requireRole("superadmin", "manager"), as
       },
     }]),
     Order.aggregate([
-      { $match: { paymentMethod: "COD", paymentStatus: "pending" } },
+      { $match: { ...filter, paymentMethod: "COD", paymentStatus: "pending" } },
       { $group: { _id: null, amount: { $sum: "$total" }, orderCount: { $sum: 1 } } },
     ]),
   ]);
@@ -981,12 +1098,12 @@ adminRouter.post("/discounts/preview", emptyQuery, requireCsrf, requireRole("sup
   const previewAt = asOf ?? new Date();
   const discounts = await Discount.find().sort({ priority: -1, _id: 1 }).lean().exec();
   response.json({
-    product: { id: String(product._id), slug: product.slug, category: product.category, price: product.price },
+    product: { id: String(product._id), slug: product.slug, category: product.category ?? "", price: product.price },
     asOf: previewAt.toISOString(),
     ...previewDiscounts(discounts as unknown as ManagedDiscount[], {
       id: String(product._id),
       slug: product.slug,
-      category: product.category,
+      category: product.category ?? "",
       tags: product.tags,
       price: product.price,
     }, previewAt),
@@ -1015,26 +1132,6 @@ adminRouter.get("/exports/orders.csv", emptyBody, emptyQuery, requireRole("super
   response.type("text/csv").attachment("orders.csv").send(rows.map((row) => row.map(cell).join(",")).join("\r\n"));
 });
 
-adminRouter.get("/messages", emptyBody, requireRole("superadmin", "manager"), async (request, response) => {
-  const { page, limit, isRead, isResolved } = messageListQuery.parse(request.query);
-  const filter = {
-    ...(isRead !== undefined && { isRead: isRead === "true" }),
-    ...(isResolved !== undefined && { isResolved: isResolved === "true" }),
-  };
-  const [items, total] = await Promise.all([
-    ContactMessage.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean().exec(),
-    ContactMessage.countDocuments(filter).exec(),
-  ]);
-  response.json({ items, page, limit, total });
-});
-adminRouter.patch("/messages/:id", emptyQuery, requireCsrf, requireRole("superadmin", "manager"), async (request, response) => {
-  const id = idSchema.parse(request.params.id);
-  const input = contactUpdateBody.parse(request.body);
-  const item = await ContactMessage.findByIdAndUpdate(id, { $set: input }, { new: true, runValidators: true }).lean().exec();
-  if (!item) return response.status(404).json({ error: "Contact message not found" });
-  await writeAudit(request, "update_contact_message", "ContactMessage", id);
-  response.json({ item });
-});
 adminRouter.get("/customers/:id/addresses", emptyBody, emptyQuery, requireRole("superadmin", "manager", "support"), async (request, response) => {
   const id = idSchema.parse(request.params.id);
   const items = await Address.find({ user: id }).lean().exec();

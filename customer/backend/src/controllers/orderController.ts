@@ -1,6 +1,7 @@
 import type { RequestHandler } from "express";
 import mongoose from "mongoose";
 
+import { env } from "../config/env.js";
 import { HttpError } from "../middleware/errors.js";
 import { Order } from "../models/Order.js";
 import { authUserId } from "../services/sessions.js";
@@ -28,10 +29,11 @@ export const createOrder: RequestHandler = async (request, response) => {
     items: body.items,
     addressId: body.addressId,
     paymentMethod: body.paymentMethod,
+    demo: env.DEMO_PAYMENTS,
     ...(body.couponCode && { couponCode: body.couponCode }),
     ...(rawIdempotencyKey && { idempotencyKey: rawIdempotencyKey }),
   });
-  response.status(201).json({ order });
+  response.status(201).json({ order, demo: order.demo });
 };
 
 export const listOrders: RequestHandler = async (request, response) => {

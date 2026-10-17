@@ -3,11 +3,13 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
+import { rateLimit } from "express-rate-limit";
 import { env } from "../config/env.js";
 import { cookieOptions, hashToken, requireAdmin, requireCsrf } from "../middleware/auth.js";
 import { AuditLog } from "../models/AuditLog.js";
 import { AdminUser } from "../models/AdminUser.js";
 import { emptyBody, emptyQuery } from "../middleware/validation.js";
+import { nextPasswordFailure, passwordChangeSchema } from "../services/passwordChange.js";
 
 const router = Router();
 const loginSchema = z.object({
@@ -15,6 +17,12 @@ const loginSchema = z.object({
   password: z.string().min(1).max(200),
 }).strict();
 const dummyPasswordHash = bcrypt.hashSync(randomBytes(32).toString("hex"), 12);
+const authActionRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 function issueAccess(admin: { id: string; email: string; role: string }): string {
   return jwt.sign(
@@ -28,7 +36,7 @@ function issueRefresh(adminId: string): string {
   return jwt.sign(
     { kind: "refresh", nonce: randomBytes(32).toString("hex") },
     env.ADMIN_JWT_SECRET,
-    { subject: adminId, expiresIn: "7d" },
+    { subject: adminId, expiresIn: "30d" },
   );
 }
 
@@ -37,8 +45,8 @@ function setSessionCookies(
   access: string,
   refresh: string,
 ): void {
-  response.cookie("admin_access", access, { ...cookieOptions, maxAge: 30 * 60 * 1000 });
-  response.cookie("admin_refresh", refresh, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 * 1000 });
+  response.cookie("admin_access", access, cookieOptions);
+  response.cookie("admin_refresh", refresh, cookieOptions);
 }
 
 router.post("/login", emptyQuery, requireCsrf, async (request, response) => {
@@ -68,7 +76,7 @@ router.post("/login", emptyQuery, requireCsrf, async (request, response) => {
   admin.lockUntil = undefined;
   const refresh = issueRefresh(String(admin._id));
   admin.refreshTokenHash = hashToken(refresh);
-  admin.refreshTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  admin.refreshTokenExpiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000);
   await admin.save();
   const details = { id: String(admin._id), email: admin.email, role: admin.role };
   await AuditLog.create({
@@ -83,38 +91,7 @@ router.post("/login", emptyQuery, requireCsrf, async (request, response) => {
   response.json({ admin: details });
 });
 
-router.post("/dev-login", emptyBody, emptyQuery, requireCsrf, async (request, response) => {
-  const address = request.socket.remoteAddress;
-  const isLoopback = address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
-  if (env.NODE_ENV !== "development" || !isLoopback) {
-    response.status(404).json({ error: "Not found" });
-    return;
-  }
-
-  const admin = await AdminUser.findOne({ role: "superadmin" }).select("_id email role").exec();
-  if (!admin) {
-    response.status(503).json({ error: "No superadmin account is configured. Run the create-admin command first." });
-    return;
-  }
-
-  const details = { id: String(admin._id), email: admin.email, role: admin.role };
-  const refresh = issueRefresh(details.id);
-  admin.refreshTokenHash = hashToken(refresh);
-  admin.refreshTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-  await admin.save();
-  await AuditLog.create({
-    actor: admin._id,
-    actorEmail: admin.email,
-    action: "development_login",
-    targetType: "AdminUser",
-    targetId: details.id,
-    ip: request.ip ?? "unknown",
-  });
-  setSessionCookies(response, issueAccess(details), refresh);
-  response.json({ admin: details });
-});
-
-router.post("/refresh", emptyBody, emptyQuery, requireCsrf, async (request, response) => {
+router.post("/refresh", authActionRateLimit, emptyBody, emptyQuery, requireCsrf, async (request, response) => {
   const refresh = request.cookies?.admin_refresh;
   if (typeof refresh !== "string") {
     response.status(401).json({ error: "Authentication required" });
@@ -133,7 +110,7 @@ router.post("/refresh", emptyBody, emptyQuery, requireCsrf, async (request, resp
       {
         $set: {
           refreshTokenHash: hashToken(nextRefresh),
-          refreshTokenExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          refreshTokenExpiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000),
         },
       },
       { new: true },
@@ -161,7 +138,7 @@ router.get("/me", emptyQuery, emptyBody, requireAdmin, (request, response) => {
   response.json({ admin: request.admin });
 });
 
-router.post("/logout", emptyBody, emptyQuery, requireAdmin, requireCsrf, async (request, response) => {
+router.post("/logout", authActionRateLimit, emptyBody, emptyQuery, requireAdmin, requireCsrf, async (request, response) => {
   await AdminUser.updateOne(
     { _id: request.admin!.id },
     { $unset: { refreshTokenHash: 1, refreshTokenExpiresAt: 1 } },
@@ -174,6 +151,75 @@ router.post("/logout", emptyBody, emptyQuery, requireAdmin, requireCsrf, async (
     action: "logout",
     targetType: "AdminUser",
     targetId: request.admin!.id,
+    ip: request.ip ?? "unknown",
+  });
+  response.status(204).end();
+});
+
+router.post("/logout-all", authActionRateLimit, emptyBody, emptyQuery, requireAdmin, requireCsrf, async (request, response) => {
+  await AdminUser.updateOne(
+    { _id: request.admin!.id },
+    { $unset: { refreshTokenHash: 1, refreshTokenExpiresAt: 1 } },
+  ).exec();
+  response.clearCookie("admin_access", cookieOptions);
+  response.clearCookie("admin_refresh", cookieOptions);
+  await AuditLog.create({
+    actor: request.admin!.id,
+    actorEmail: request.admin!.email,
+    action: "logout_all",
+    targetType: "AdminUser",
+    targetId: request.admin!.id,
+    ip: request.ip ?? "unknown",
+  });
+  response.status(204).end();
+});
+
+router.post("/change-password", authActionRateLimit, emptyQuery, requireAdmin, requireCsrf, async (request, response) => {
+  const input = passwordChangeSchema.parse(request.body);
+  const admin = await AdminUser.findById(request.admin!.id)
+    .select("+passwordHash +passwordChangeFailedAttempts +passwordChangeLockUntil")
+    .exec();
+  const now = new Date();
+  if (!admin || (admin.passwordChangeLockUntil && admin.passwordChangeLockUntil > now)) {
+    if (admin) {
+      await AuditLog.create({
+        actor: admin._id,
+        actorEmail: admin.email,
+        action: "change_password_failed",
+        targetType: "AdminUser",
+        targetId: String(admin._id),
+        ip: request.ip ?? "unknown",
+      });
+    }
+    response.status(400).json({ error: "Unable to change password" });
+    return;
+  }
+  if (!(await bcrypt.compare(input.currentPassword, admin.passwordHash))) {
+    const failure = nextPasswordFailure(admin.passwordChangeFailedAttempts ?? 0, now);
+    admin.passwordChangeFailedAttempts = failure.failedAttempts;
+    if (failure.lockUntil) admin.passwordChangeLockUntil = failure.lockUntil;
+    await admin.save();
+    await AuditLog.create({
+      actor: admin._id,
+      actorEmail: admin.email,
+      action: "change_password_failed",
+      targetType: "AdminUser",
+      targetId: String(admin._id),
+      ip: request.ip ?? "unknown",
+    });
+    response.status(400).json({ error: "Unable to change password" });
+    return;
+  }
+  admin.passwordHash = await bcrypt.hash(input.newPassword, 12);
+  admin.passwordChangeFailedAttempts = 0;
+  admin.passwordChangeLockUntil = undefined;
+  await admin.save();
+  await AuditLog.create({
+    actor: admin._id,
+    actorEmail: admin.email,
+    action: "change_password",
+    targetType: "AdminUser",
+    targetId: String(admin._id),
     ip: request.ip ?? "unknown",
   });
   response.status(204).end();

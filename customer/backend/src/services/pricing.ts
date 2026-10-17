@@ -5,6 +5,7 @@ import { Coupon } from "../models/Coupon.js";
 import { CouponRedemption } from "../models/CouponRedemption.js";
 import { Discount } from "../models/Discount.js";
 import { Product } from "../models/Product.js";
+import { Setting } from "../models/Setting.js";
 import { HttpError } from "../middleware/errors.js";
 import { priceWithDiscounts, selectApplicableDiscounts, type DiscountSnapshot } from "./discounts.js";
 
@@ -57,7 +58,7 @@ export async function calculateCartPrice(
   const byId = new Map(products.map((product) => [String(product._id).toLowerCase(), product]));
   for (const item of items) {
     const product = byId.get(item.productId.toLowerCase());
-    if (!product || sizeStock(product, item.size) === undefined || !product.colors.includes(item.color)) {
+    if (!product || sizeStock(product, item.size) === undefined || !(product.colors.length ? product.colors : ["Default"]).includes(item.color)) {
       throw new HttpError(400, "A cart item is unavailable");
     }
   }
@@ -82,12 +83,13 @@ export async function calculateCartPrice(
       {
         id: item.productId.toLowerCase(),
         slug: product.slug,
-        category: product.category,
+        category: product.category ?? "",
         collection: product.subCategory,
       },
       now,
     );
-    const price = priceWithDiscounts(product.price, applicable);
+    const basePrice = typeof product.mrp === "number" ? product.mrp : product.price;
+    const price = priceWithDiscounts(basePrice, applicable);
     productDiscountTotal += price.discountAmount * item.qty;
     return {
       product: product._id,
@@ -96,7 +98,7 @@ export async function calculateCartPrice(
       color: item.color,
       qty: item.qty,
       unitPrice: price.price,
-      originalUnitPrice: product.price,
+      originalUnitPrice: basePrice,
       discountAmount: price.discountAmount * item.qty,
       discounts: price.discounts,
     };
@@ -119,9 +121,12 @@ export async function calculateCartPrice(
     const coupon = await Coupon.findOne({
       code: couponCode.toUpperCase(),
       isActive: true,
-      expiresAt: { $gt: new Date() },
+      expiresAt: { $gt: now },
+      $and: [
+        { $or: [{ startsAt: { $lte: now } }, { startsAt: { $exists: false } }] },
+        { $or: [{ userRef: null }, { userRef: { $exists: false } }, { userRef: userId }] },
+      ],
       $expr: { $lt: ["$usedCount", "$usageLimit"] },
-      $or: [{ userRef: null }, { userRef: { $exists: false } }, { userRef: userId }],
     })
       .session(session ?? null)
       .exec();
@@ -145,7 +150,9 @@ export async function calculateCartPrice(
   }
 
   const discount = productDiscountTotal + couponDiscount;
-  const shipping = discountedSubtotal - couponDiscount > 999 ? 0 : 99;
+  const setting = await Setting.findById("store-settings").select("freeShippingThreshold").lean().exec();
+  const freeShippingThreshold = setting?.freeShippingThreshold ?? 999;
+  const shipping = discountedSubtotal - couponDiscount > freeShippingThreshold ? 0 : 99;
   return {
     items: pricedItems,
     subtotal: originalSubtotal,
@@ -157,6 +164,7 @@ export async function calculateCartPrice(
 }
 
 function sizeStock(product: { sizes: unknown[]; stock: number }, size: string): number | undefined {
+  if (product.sizes.length === 0 && size === "One Size") return product.stock;
   const match = product.sizes.find((entry) =>
     typeof entry === "string" ? entry === size : isSizeStock(entry) && entry.size === size,
   );
@@ -180,13 +188,17 @@ export async function consumeCoupon(
   userId: string,
   session?: ClientSession,
 ): Promise<void> {
+  const now = new Date();
   const coupon = await Coupon.findOneAndUpdate(
     {
       code: couponCode,
       isActive: true,
-      expiresAt: { $gt: new Date() },
+      expiresAt: { $gt: now },
+      $and: [
+        { $or: [{ startsAt: { $lte: now } }, { startsAt: { $exists: false } }] },
+        { $or: [{ userRef: null }, { userRef: { $exists: false } }, { userRef: userId }] },
+      ],
       $expr: { $lt: ["$usedCount", "$usageLimit"] },
-      $or: [{ userRef: null }, { userRef: { $exists: false } }, { userRef: userId }],
     },
     { $inc: { usedCount: 1 } },
     { new: true, ...(session && { session }) },

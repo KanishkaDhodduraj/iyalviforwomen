@@ -1,58 +1,48 @@
 import { describe, expect, it } from "vitest";
 import { productInputSchema, productUpdateSchema } from "./product.js";
 
-const validProduct = {
-  slug: "summer-kurti",
-  sku: "SKU-1",
-  name: "Summer Kurti",
-  description: "Light cotton",
-  category: "kurti",
-  subCategory: "casual",
-  fabric: "cotton",
-  occasion: "everyday",
-  colors: ["blue"],
-  sizes: [{ size: "M", stock: 4 }, { size: "L", stock: 2 }],
-  price: 1000,
-  mrp: 1200,
-  costPrice: 400,
-  images: [{ url: "/uploads/products/image.webp", key: "12345678-1234-1234-1234-123456789012.webp", alt: "Blue kurti", isPrimary: true }],
-  tags: ["summer"],
-  isActive: true,
-  isFeatured: false,
-};
-
 describe("product management schemas", () => {
-  it("accepts model-shaped sizes and embedded images with defaults", () => {
-    const parsed = productInputSchema.parse(validProduct);
-    expect(parsed.sizes[0]).toEqual({ size: "M", stock: 4 });
-    expect(parsed.images[0]).toMatchObject({ key: validProduct.images[0].key, alt: "Blue kurti", isPrimary: true });
-    expect(parsed.archived).toBe(false);
+  it("requires only a name and MRP and supplies optional-field defaults", () => {
+    const parsed = productInputSchema.parse({ name: "Summer Kurti", mrp: 1200 });
+    expect(parsed).toMatchObject({
+      name: "Summer Kurti",
+      mrp: 1200,
+      sizes: [],
+      colors: [],
+      images: [],
+      isActive: true,
+      isNewArrival: false,
+    });
+    expect(parsed).not.toHaveProperty("slug");
+    expect(parsed).not.toHaveProperty("price");
   });
 
-  it("rejects duplicate sizes, multiple primary images, and costs in legacy shapes", () => {
-    expect(productInputSchema.safeParse({ ...validProduct, sizes: [{ size: "M", stock: 1 }, { size: "m", stock: 2 }] }).success).toBe(false);
+  it("accepts one total stock value or distinct size stock, but not both", () => {
+    expect(productInputSchema.safeParse({ name: "Saree", mrp: 1200, stock: 12 }).success).toBe(true);
+    expect(productInputSchema.safeParse({ name: "Saree", mrp: 1200, sizes: [{ size: "M", stock: 4 }] }).success).toBe(true);
     expect(productInputSchema.safeParse({
-      ...validProduct,
-      images: [...validProduct.images, { ...validProduct.images[0], url: "/second.webp" }],
-    }).success).toBe(false);
-    expect(productInputSchema.safeParse({ ...validProduct, sizes: ["M", "L"] }).success).toBe(false);
-    expect(productInputSchema.safeParse({ ...validProduct, images: ["/image.webp"] }).success).toBe(false);
-  });
-
-  it("requires exactly one primary image and unique local image keys", () => {
-    expect(productInputSchema.safeParse({
-      ...validProduct,
-      images: [{ ...validProduct.images[0], isPrimary: false }],
+      name: "Saree",
+      mrp: 1200,
+      stock: 12,
+      sizes: [{ size: "M", stock: 4 }],
     }).success).toBe(false);
     expect(productInputSchema.safeParse({
-      ...validProduct,
-      images: [validProduct.images[0], { ...validProduct.images[0], url: "/second.webp", isPrimary: false }],
+      name: "Saree",
+      mrp: 1200,
+      sizes: [{ size: "M", stock: 1 }, { size: "m", stock: 2 }],
     }).success).toBe(false);
   });
 
-  it("strictly accepts only partial model-shaped updates", () => {
+  it("validates optional images and their primary key constraints", () => {
+    const image = { url: "/uploads/products/image.webp", key: "12345678-1234-1234-1234-123456789012.webp", alt: "Blue kurti", isPrimary: true };
+    expect(productInputSchema.safeParse({ name: "Kurti", mrp: 1200, images: [image] }).success).toBe(true);
+    expect(productInputSchema.safeParse({ name: "Kurti", mrp: 1200, images: [{ ...image, isPrimary: false }] }).success).toBe(false);
+    expect(productInputSchema.safeParse({ name: "Kurti", mrp: 1200, slug: "provided-slug" }).success).toBe(false);
+  });
+
+  it("accepts only partial updates and rejects unknown fields", () => {
+    expect(productUpdateSchema.safeParse({ stock: 4 }).success).toBe(true);
     expect(productUpdateSchema.safeParse({ isFeatured: true, costPrice: 500 }).success).toBe(true);
-    expect(productUpdateSchema.safeParse({ stock: 4 }).success).toBe(false);
     expect(productUpdateSchema.safeParse({ isActive: true, unknown: true }).success).toBe(false);
   });
 });

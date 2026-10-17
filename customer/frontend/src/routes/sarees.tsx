@@ -7,7 +7,8 @@ export const Route = createFileRoute("/sarees")({
       { title: "Sarees — IYALVI" },
       {
         name: "description",
-        content: "Explore easy-to-wear Sarees for everyday plans, celebrations and everything in between.",
+        content:
+          "Explore easy-to-wear Sarees for everyday plans, celebrations and everything in between.",
       },
     ],
   }),

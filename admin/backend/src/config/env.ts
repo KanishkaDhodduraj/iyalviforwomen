@@ -4,7 +4,9 @@ import dotenv from "dotenv";
 import { z } from "zod";
 
 const envPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../.env");
-dotenv.config({ path: envPath, quiet: true });
+if (process.env.NODE_ENV !== "test") {
+  dotenv.config({ path: envPath, quiet: true });
+}
 
 const schema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(5001),
@@ -19,6 +21,7 @@ const schema = z.object({
   }).transform((value) => value.replace(/\/$/, "")),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   COOKIE_SAME_SITE: z.enum(["lax", "none"]).default("lax"),
+  CRON_SECRET: z.string().min(1).optional(),
   TRUST_PROXY: z.enum(["0", "1", "true", "false"]).default("0"),
 });
 

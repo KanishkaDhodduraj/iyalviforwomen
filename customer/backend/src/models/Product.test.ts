@@ -10,7 +10,6 @@ describe("customer product model", () => {
       category: "saree",
       subCategory: "Silk",
       fabric: "Silk",
-      occasion: "Wedding",
       colors: ["Red"],
       sizes: [{ size: "Free Size", stock: 2 }],
       price: 1000,

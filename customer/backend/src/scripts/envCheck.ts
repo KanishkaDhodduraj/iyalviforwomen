@@ -16,6 +16,7 @@ const clientUrl = envValues.CLIENT_URL;
 const jwtSecret = envValues.JWT_SECRET;
 const nodeEnv = envValues.NODE_ENV;
 const trustProxy = envValues.TRUST_PROXY;
+const demoPayments = envValues.DEMO_PAYMENTS ?? "false";
 
 report("PORT", port, (value) =>
   /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 65_535
@@ -46,6 +47,9 @@ report("NODE_ENV", nodeEnv, (value) =>
     : "must be development, test, or production",
 );
 report("TRUST_PROXY", trustProxy, () => undefined);
+report("DEMO_PAYMENTS", demoPayments, (value) =>
+  value === "true" || value === "false" ? undefined : "must be true or false",
+);
 
 function report(
   key: string,

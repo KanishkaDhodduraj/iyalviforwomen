@@ -38,7 +38,7 @@ export function useDragScroll() {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     dragging.current = false;
-    if (moved.current)
+    if (moved.current && typeof window !== "undefined")
       window.setTimeout(() => {
         moved.current = false;
       }, 0);
