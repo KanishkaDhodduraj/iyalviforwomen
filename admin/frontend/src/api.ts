@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/+$/, "");
+const defaultApiBaseUrl = apiBaseUrl ? `${apiBaseUrl}/api` : "/api";
+
 export interface AdminUser {
   id: string;
   email: string;
@@ -30,7 +33,10 @@ type Fetcher = typeof fetch;
 export class AdminApiClient {
   private refreshPromise: Promise<boolean> | null = null;
 
-  constructor(private readonly fetcher: Fetcher = fetch, private readonly baseUrl = "/api") {}
+  constructor(
+    private readonly fetcher: Fetcher = globalThis.fetch.bind(globalThis),
+    private readonly baseUrl = defaultApiBaseUrl,
+  ) {}
 
   private async request<T>(
     path: string,
@@ -152,4 +158,5 @@ export const authApi = {
   },
   me: () => adminApi.get<{ admin: AdminUser }>("/auth/me"),
   logout: () => adminApi.post<void>("/auth/logout"),
+  devLogin: () => adminApi.post<{ admin: AdminUser }>("/auth/dev-login"),
 };

@@ -18,6 +18,7 @@ const schema = z.object({
     );
   }).transform((value) => value.replace(/\/$/, "")),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  COOKIE_SAME_SITE: z.enum(["lax", "none"]).default("lax"),
   TRUST_PROXY: z.enum(["0", "1", "true", "false"]).default("0"),
 });
 

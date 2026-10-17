@@ -10,7 +10,10 @@ const inputSchema = z.object({
   ADMIN_EMAIL: z.string().email().max(254),
   ADMIN_PASSWORD: z.string().min(12).max(200),
 }).strict();
-const input = inputSchema.safeParse(process.env);
+const input = inputSchema.safeParse({
+  ADMIN_EMAIL: process.env.ADMIN_EMAIL,
+  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
+});
 if (!input.success) {
   const keys = [...new Set(input.error.issues.map((issue) => issue.path.join(".")))];
   console.error(`Invalid admin bootstrap environment. Check: ${keys.join(", ")}`);

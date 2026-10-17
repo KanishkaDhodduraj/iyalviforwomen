@@ -170,7 +170,7 @@ export const csrfToken: RequestHandler = (_request, response) => {
   response.cookie("csrfToken", csrf, {
     httpOnly: false,
     secure: env.NODE_ENV === "production",
-    sameSite: env.NODE_ENV === "production" ? "none" : "lax",
+    sameSite: env.COOKIE_SAME_SITE,
     path: "/",
   });
   response.json({ csrfToken: csrf });

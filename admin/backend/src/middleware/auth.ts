@@ -14,7 +14,7 @@ declare module "express-serve-static-core" {
 export const cookieOptions = {
   httpOnly: true,
   secure: env.NODE_ENV === "production",
-  sameSite: env.NODE_ENV === "production" ? ("none" as const) : ("lax" as const),
+  sameSite: env.COOKIE_SAME_SITE,
   path: "/",
 };
 

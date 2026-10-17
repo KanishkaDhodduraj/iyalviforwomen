@@ -83,6 +83,37 @@ router.post("/login", emptyQuery, requireCsrf, async (request, response) => {
   response.json({ admin: details });
 });
 
+router.post("/dev-login", emptyBody, emptyQuery, requireCsrf, async (request, response) => {
+  const address = request.socket.remoteAddress;
+  const isLoopback = address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+  if (env.NODE_ENV !== "development" || !isLoopback) {
+    response.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  const admin = await AdminUser.findOne({ role: "superadmin" }).select("_id email role").exec();
+  if (!admin) {
+    response.status(503).json({ error: "No superadmin account is configured. Run the create-admin command first." });
+    return;
+  }
+
+  const details = { id: String(admin._id), email: admin.email, role: admin.role };
+  const refresh = issueRefresh(details.id);
+  admin.refreshTokenHash = hashToken(refresh);
+  admin.refreshTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  await admin.save();
+  await AuditLog.create({
+    actor: admin._id,
+    actorEmail: admin.email,
+    action: "development_login",
+    targetType: "AdminUser",
+    targetId: details.id,
+    ip: request.ip ?? "unknown",
+  });
+  setSessionCookies(response, issueAccess(details), refresh);
+  response.json({ admin: details });
+});
+
 router.post("/refresh", emptyBody, emptyQuery, requireCsrf, async (request, response) => {
   const refresh = request.cookies?.admin_refresh;
   if (typeof refresh !== "string") {
