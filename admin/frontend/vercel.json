@@ -2,11 +2,11 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://REPLACE-WITH-ADMIN-API-VERCEL-DOMAIN/api/:path*"
+      "destination": "https://iyalviforwomen-admin.vercel.app/api/:path*"
     },
     {
       "source": "/uploads/:path*",
-      "destination": "https://REPLACE-WITH-ADMIN-API-VERCEL-DOMAIN/uploads/:path*"
+      "destination": "https://iyalviforwomen-admin.vercel.app/uploads/:path*"
     },
     {
       "source": "/(.*)",
